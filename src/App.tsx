@@ -197,8 +197,6 @@ function App() {
   if (!group) return <div className="auth-loading">{authError || 'Gruppen kunde inte hittas.'}</div>
 
   const savedCount = Object.keys(selected).length
-  const cost = system.rows
-  const budget = groupMembers.length * (round?.weekly_contribution ?? 20)
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -221,27 +219,23 @@ function App() {
       {activeSection === 'team' ? <TeamPanel group={group} members={groupMembers} groupId={groupId} round={round} system={system} matches={activeMatches} votes={groupVotes} payments={payments} currentUserId={session.user.id} onRoundChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
       <div className="round-layout">
         <div className="personal-round">
-        <section className="section-intro"><div><p className="eyebrow">MINA TIPS · {savedCount}/13</p><h2>Din rad</h2><p>Välj ett tecken per match. Gruppens system byggs här under.</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
+        <section className="section-intro"><div><p className="eyebrow">MINA TIPS · {savedCount}/13</p><h2>96-raderssystemet</h2><p>Välj dina tecken. Här ser du folkets fördelning, systemet och lagets röster.</p><p className="system-meta">Kapten: {captain?.display_name ?? 'inte vald'} · avgör vid låsning</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
         {activeMatches.length ? <div className="match-list">
+          <div className="match-list-header"><span>MATCH</span><span>SVENSKA FOLKET</span><span>SYSTEM</span><span>LAGETS RÖSTER</span></div>
           {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
             <span className="match-number">{String(match.number).padStart(2, '0')}</span>
             <div className="match-info"><strong>{match.home} <b>v</b> {match.away}</strong><small>{match.kickoff}{match.venue ? ` · ${match.venue}` : ''}{match.info ? ` · ${match.info}` : ''}</small></div>
-            <div className="pick-group" aria-label={`Välj tecken för ${match.home} mot ${match.away}`}>
+            <div className="pick-group folk-picks" aria-label={`Svenska folkets fördelning för ${match.home} mot ${match.away}`}>
               {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => savePick(match, pick)}>{pick}<small>{match.picks[pick]}</small></button>)}
             </div>
             <div className="system-pick" aria-label={`Gruppens system för match ${match.number}`}><small>SYS</small><strong>{system.columns[match.number - 1]?.join('') ?? '-'}</strong></div>
+            <div className="member-picks">{groupMembers.map((member) => { const vote = groupVotes.find((item) => item.match_id === match.id && item.user_id === member.user_id); return <span key={member.user_id} title={`${member.display_name}: ${vote?.selection ?? 'inte röstat'}`} className={vote ? '' : 'missing'}><b>{member.display_name.slice(0, 2).toUpperCase()}</b>{vote?.selection ?? '-'}</span> })}</div>
           </article>)}
         </div> : <div className="empty-round">Ingen aktiv omgång ännu. Be kaptenen importera veckans matcher.</div>}
 
         </div>
-      <section className="system-panel" aria-label="Gruppens system">
-        <div className="panel-heading"><div><h2>Systembygget</h2></div><Receipt size={20} /></div>
-        <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>System / budget</span><b>{cost.toFixed(0)} / {budget.toFixed(0)} kr</b></div></div>
-        <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: `${Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%` }} /></div><b>{Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%</b></div>
-        <p className="system-note">Fast 96-raderssystem: {system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgardering. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
-      </section>
       </div>
-      <SnackisPanel members={groupMembers} matches={activeMatches} votes={groupVotes} system={system} />
+      <SnackisPanel matches={activeMatches} votes={groupVotes} system={system} />
 
       </>}
 
@@ -402,22 +396,16 @@ function TeamPanel({ group, members, groupId, round, system, matches, votes, pay
   return <section className="team-view"><div className="group-card"><p className="eyebrow">LAGET</p><h2>{group.name}</h2><p>Fem kompisar, ett gemensamt system och 20 kr var till Svenska Spel-laget.</p><button className="group-code" onClick={async () => navigator.clipboard.writeText(group.join_code)}><span>{group.join_code}</span><small>Kopiera kod</small></button></div><CaptainPanel members={members} groupId={groupId} currentUserId={currentUserId} currentDrawNumber={round?.external_draw_number} round={round} system={system} matches={matches} votes={votes} sessionUserId={currentUserId} onRoundImported={onRoundChanged} /><CashPanel groupId={groupId} round={round} members={members} payments={payments} currentUserId={currentUserId} onPaymentsChanged={onRoundChanged} /></section>
 }
 
-function SnackisPanel({ members, matches, votes, system }: { members: GroupMember[]; matches: Match[]; votes: GroupVote[]; system: { columns: Pick[][]; rows: number } }) {
-  const matchRows = matches.map((match, index) => {
-    const picks = votes.filter((vote) => vote.match_id === match.id).map((vote) => vote.selection)
-    return { match, index, picks, split: new Set(picks).size }
+function SnackisPanel({ matches, votes, system }: { matches: Match[]; votes: GroupVote[]; system: { columns: Pick[][]; rows: number } }) {
+  const matchStats = matches.map((match, index) => {
+    const matchVotes = votes.filter((vote) => vote.match_id === match.id)
+    const counts = Object.fromEntries(pickOrder.map((pick) => [pick, matchVotes.filter((vote) => vote.selection === pick).length])) as Record<Pick, number>
+    const total = matchVotes.length
+    const leading = pickOrder.slice().sort((left, right) => counts[right] - counts[left] || pickOrder.indexOf(left) - pickOrder.indexOf(right))[0]
+    return { match, index, counts, total, leading }
   })
-  const mostDiscussed = matchRows.slice().sort((left, right) => right.split - left.split || right.picks.length - left.picks.length)[0]
-  const memberStats = members.map((member) => {
-    const memberPicks = matchRows.map(({ match }) => votes.find((vote) => vote.match_id === match.id && vote.user_id === member.user_id)?.selection)
-    const aligned = memberPicks.filter((pick, index) => pick && system.columns[index]?.includes(pick)).length
-    const unique = memberPicks.filter((pick, index) => pick && !system.columns[index]?.includes(pick)).length
-    return { member, picks: memberPicks, aligned, unique }
-  })
-  const mostAligned = memberStats.slice().sort((left, right) => right.aligned - left.aligned)[0]
-  const boldest = memberStats.slice().sort((left, right) => right.unique - left.unique)[0]
 
-  return <section className="snackis-panel"><div className="panel-heading"><div><p className="eyebrow">LAGETS RÖSTER</p><h2>Vem tog vad?</h2></div><span className="snackis-count">{members.length} rader</span></div>{mostDiscussed && mostDiscussed.split > 1 && <div className="debate-card"><span className="debate-label">VECKANS HETASTE</span><strong>{mostDiscussed.match.number}. {mostDiscussed.match.home} v {mostDiscussed.match.away}</strong><span>{mostDiscussed.picks.join(' / ')} · här går laget isär</span></div>}<div className="badge-row">{mostAligned && <span><b>✓</b> Mest enig: {mostAligned.member.display_name}</span>}{boldest && boldest.unique > 0 && <span><b>↗</b> Mest modig: {boldest.member.display_name}</span>}</div><div className="vote-board"><div className="vote-board-header"><span>MEDLEM</span>{matches.map((match) => <small key={match.id}>{String(match.number).padStart(2, '0')}</small>)}</div>{memberStats.map(({ member, picks }) => <div className="vote-board-row" key={member.user_id}><strong>{member.display_name}</strong>{matches.map((match, index) => { const pick = picks[index]; const differs = pick && !system.columns[index]?.includes(pick); return <span className={differs ? 'differs' : ''} key={match.id}>{pick ?? '-'}</span> })}</div>)}</div><p className="snackis-note">Avvikande val markeras. Det är här man ser varför laget tycker olika.</p></section>
+  return <section className="snackis-panel"><div className="panel-heading"><div><p className="eyebrow">LAGETS RÖSTER</p><h2>Så har laget tippat</h2></div><span className="snackis-count">{votes.length} tips</span></div><p className="snackis-intro">Se hur många som valt 1, X eller 2 i varje match. Systemets tecken markeras separat.</p><div className="vote-stats">{matchStats.map(({ match, index, counts, total, leading }) => <div className="vote-stat" key={match.id ?? match.number}><div className="vote-stat-match"><strong>{String(match.number).padStart(2, '0')} · {match.home} v {match.away}</strong><small>{total ? `${total} av lagets tips` : 'Ingen har röstat ännu'} · system {system.columns[index]?.join('')}</small></div><div className="vote-stat-picks">{pickOrder.map((pick) => <span className={counts[pick] > 0 && pick === leading ? 'leading' : ''} key={pick}><b>{pick}</b><small>{counts[pick]}</small></span>)}</div></div>)}</div><p className="snackis-note">Grönt tecken leder bland lagets sparade tips. Oavgjort visas utan att något tecken favoriseras.</p></section>
 }
 
 export default App
