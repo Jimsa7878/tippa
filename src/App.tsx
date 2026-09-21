@@ -278,7 +278,7 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
   const [mode, setMode] = useState<'join' | 'create'>('join')
   const [name, setName] = useState('')
   const [groupName, setGroupName] = useState('')
-  const [code, setCode] = useState('14141')
+  const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -305,7 +305,7 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
         <form onSubmit={handleSubmit}>
           <label>Ditt namn<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Till exempel Jim" required /></label>
           {mode === 'create' && <label>Gruppens namn<input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Till exempel Lördagsgänget" required /></label>}
-          <label>Gruppkod<input inputMode="numeric" pattern="[0-9]{5}" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} required /></label>
+          <label>Gruppkod<input inputMode="numeric" pattern="[0-9]{5}" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="Till exempel 37742" autoComplete="off" required /></label>
           {error && <p className="auth-error">{error}</p>}
           <button className="primary-button" disabled={submitting}>{submitting ? 'Arbetar...' : mode === 'join' ? 'Anslut till gruppen' : 'Skapa gruppen'} <ChevronRight size={17} /></button>
         </form>
