@@ -249,7 +249,7 @@ function App() {
       {activeSection === 'team' ? <TeamPanel group={group} members={groupMembers} groupId={groupId} round={round} system={system} matches={activeMatches} votes={groupVotes} payments={payments} currentUserId={session.user.id} onRoundChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
       <div className="round-layout">
         <div className="personal-round">
-        <section className="section-intro"><div><p className="eyebrow">MINA TIPS · {savedCount}/13</p><h2>96-raderssystemet</h2><p>Välj dina tecken. Här ser du folkets fördelning, systemet och lagets röster.</p><p className="system-meta">Kapten: {captain?.display_name ?? 'inte vald'} · avgör vid låsning</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
+        <section className="section-intro"><div><p className="eyebrow">MINA TIPS · {savedCount}/13</p><h2>96-raderssystemet</h2><p>Välj dina tecken. Här ser du folkets fördelning, systemet och lagets röster.</p><p className="system-meta">Kapten: {captain?.display_name ?? 'inte vald'} · avgör vid låsning</p>{authError && <p className="auth-error">{authError}</p>}</div><span className="save-state"><Check size={14} /> Sparad</span></section>
         {activeMatches.length ? <div className="match-list">
           <div className="match-list-header"><span>MATCH</span><span>SVENSKA FOLKET</span><span>SYSTEM</span><span>LAGETS RÖSTER</span></div>
           {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
