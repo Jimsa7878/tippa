@@ -135,7 +135,7 @@ function AuthScreen() {
 
     const result = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: window.location.href },
     })
 
     if (result.error) setError(result.error.message)
