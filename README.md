@@ -40,7 +40,7 @@ Deploya funktionen med Supabase CLI:
 supabase functions deploy import-svenska-spel
 ```
 
-`SVENSKA_SPEL_DRAWS_URL` är valfri. Om den finns används den för att hitta aktuell komplett omgång; annars används `SVENSKA_SPEL_API_URL` som manuell fallback. Anropet kräver en inloggad gruppmedlem och JSON med `groupId` och `internalDeadlineAt`. Funktionen kräver exakt 13 matcher och sparar dem till `rounds` och `matches`.
+`SVENSKA_SPEL_DRAWS_URL` är valfri. Om den finns används den för att hitta aktuell komplett omgång; annars används `SVENSKA_SPEL_API_URL` som startpunkt. Importen läser gruppens senast sparade omgång och försöker sedan nästa nummer, exempelvis `4972` efter `4971`. En ny omgång sparas först när exakt 13 matcher har hittats. Anropet kräver en inloggad gruppmedlem och JSON med `groupId` och `internalDeadlineAt`.
 
 ## GitHub Pages
 

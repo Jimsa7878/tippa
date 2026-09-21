@@ -45,19 +45,37 @@ function asResult(value: unknown): '1' | 'X' | '2' | null {
   return result === '1' || result === 'X' || result === '2' ? result : null
 }
 
+function resultFromGoals(home: unknown, away: unknown): '1' | 'X' | '2' | null {
+  if (home === null || home === undefined || away === null || away === undefined || home === '' || away === '') return null
+  const homeGoals = Number(home)
+  const awayGoals = Number(away)
+  if (!Number.isFinite(homeGoals) || !Number.isFinite(awayGoals)) return null
+  if (homeGoals > awayGoals) return '1'
+  if (homeGoals < awayGoals) return '2'
+  return 'X'
+}
+
 function normalizeEvent(eventValue: unknown, index: number): NormalizedMatch {
   const event = asRecord(eventValue)
-  const home = asRecord(firstValue(event, ['homeTeam', 'home', 'homeParticipant']))
-  const away = asRecord(firstValue(event, ['awayTeam', 'away', 'awayParticipant']))
+  const match = asRecord(firstValue(event, ['match']))
+  const participants = Array.isArray(match.participants) ? match.participants.map(asRecord) : []
+  const home = participants.find((participant) => participant.type === 'home') ?? asRecord(firstValue(event, ['homeTeam', 'home', 'homeParticipant']))
+  const away = participants.find((participant) => participant.type === 'away') ?? asRecord(firstValue(event, ['awayTeam', 'away', 'awayParticipant']))
+  const league = asRecord(match.league)
   const matchNumber = Number(firstValue(event, ['matchNumber', 'eventNumber', 'number'])) || index + 1
-  const externalMatchId = Number(firstValue(event, ['matchId', 'externalMatchId', 'id'])) || null
+  const externalMatchId = Number(firstValue(match, ['matchId', 'externalMatchId', 'id'])) || Number(firstValue(event, ['matchId', 'externalMatchId', 'id'])) || null
   const homeTeam = asText(home) ?? asText(firstValue(event, ['homeTeamName', 'homeName'])) ?? 'Okant hemmalag'
   const awayTeam = asText(away) ?? asText(firstValue(event, ['awayTeamName', 'awayName'])) ?? 'Okant bortalag'
-  const kickoff = firstValue(event, ['kickoffAt', 'matchStart', 'startTime', 'kickoff'])
-  const venue = asText(firstValue(event, ['venue', 'stadium', 'arena', 'venueName']))
-  const info = asText(firstValue(event, ['info', 'matchInfo', 'competition', 'league']))
-  const result = asResult(firstValue(event, ['result', 'outcome', 'sign']))
-  const svenskaFolket = firstValue(event, ['svenskaFolket', 'publicDistribution', 'folketsFordelning', 'distribution'])
+  const kickoff = firstValue(match, ['matchStart', 'kickoffAt', 'startTime', 'kickoff']) ?? firstValue(event, ['kickoffAt', 'matchStart', 'startTime', 'kickoff'])
+  const venue = asText(firstValue(match, ['venue', 'stadium', 'arena', 'venueName'])) ?? asText(firstValue(event, ['venue', 'stadium', 'arena', 'venueName']))
+  const info = asText(league) ?? asText(firstValue(event, ['info', 'matchInfo', 'competition', 'league']))
+  const result = asResult(firstValue(event, ['result', 'outcome', 'sign'])) ?? resultFromGoals(firstValue(home, ['result']), firstValue(away, ['result']))
+  const publicDistribution = asRecord(firstValue(event, ['svenskaFolket', 'publicDistribution', 'folketsFordelning', 'distribution']))
+  const svenskaFolket = {
+    '1': Number(firstValue(publicDistribution, ['one', '1']) ?? 0),
+    X: Number(firstValue(publicDistribution, ['x', 'X']) ?? 0),
+    '2': Number(firstValue(publicDistribution, ['two', '2']) ?? 0),
+  }
 
   return {
     matchNumber,
@@ -101,6 +119,13 @@ async function fetchJson(url: string): Promise<unknown> {
   return response.json()
 }
 
+function drawUrlForNumber(apiUrl: string, drawNumber: number): string {
+  const url = new URL(apiUrl)
+  if (!/\/\d+\/?$/.test(url.pathname)) throw new Error('SVENSKA_SPEL_API_URL must end with a draw number')
+  url.pathname = url.pathname.replace(/\d+\/?$/, String(drawNumber))
+  return url.toString()
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -129,29 +154,42 @@ Deno.serve(async (request) => {
     const isGroupCreator = group?.created_by === userData.user.id
     if ((!membership || !membership.active) && !isGroupCreator) throw new Error('Your current user is not an active member of this group')
 
+    const { data: latestRound, error: latestRoundError } = await userClient.from('rounds').select('external_draw_number').eq('group_id', body.groupId).not('external_draw_number', 'is', null).order('external_draw_number', { ascending: false }).limit(1).maybeSingle()
+    if (latestRoundError) throw new Error(`Could not find latest round: ${latestRoundError.message}`)
+    const configuredDrawNumber = Number(apiUrl.match(/\/([0-9]+)\/?(?:\?.*)?$/)?.[1]) || null
+    const nextDrawNumber = body.drawNumber ?? (latestRound?.external_draw_number ? latestRound.external_draw_number + 1 : configuredDrawNumber)
+    if (!nextDrawNumber) throw new Error('Could not determine the next draw number')
+    const requestedApiUrl = drawUrlForNumber(apiUrl, nextDrawNumber)
+
     let draw: JsonRecord
     if (drawsUrl) {
       try {
-        draw = findDraw(await fetchJson(drawsUrl), body.drawNumber)
+        draw = findDraw(await fetchJson(drawsUrl), nextDrawNumber)
         if (extractEvents(draw).length !== 13) throw new Error('Draw discovery returned no complete 13-match draw')
       } catch (discoveryError) {
-        if (body.drawNumber === undefined) throw discoveryError
-        draw = findDraw(await fetchJson(apiUrl), body.drawNumber)
+        draw = findDraw(await fetchJson(requestedApiUrl), nextDrawNumber)
       }
     } else {
-      draw = findDraw(await fetchJson(apiUrl), body.drawNumber)
+      try {
+        draw = findDraw(await fetchJson(requestedApiUrl), nextDrawNumber)
+      } catch (error) {
+        if (error instanceof Error && /returned (400|404)/.test(error.message)) {
+          throw new Error(`Omgång ${nextDrawNumber} är inte publicerad ännu`)
+        }
+        throw error
+      }
     }
     const events = extractEvents(draw).map(normalizeEvent).sort((left, right) => left.matchNumber - right.matchNumber)
     if (events.length !== 13) throw new Error(`Expected 13 draw events, received ${events.length}`)
 
     const drawNumber = Number(firstValue(draw, ['drawNumber', 'externalDrawNumber', 'number'])) || null
-    const officialCloseAt = firstValue(draw, ['officialCloseAt', 'closingTime', 'closeTime', 'spelstopp'])
+    const officialCloseAt = firstValue(draw, ['officialCloseAt', 'regCloseTime', 'closingTime', 'closeTime', 'spelstopp'])
     if (drawNumber === null) throw new Error('Svenska Spel API returned no draw number')
 
     const roundPayload = {
       group_id: body.groupId,
       external_draw_number: drawNumber,
-      label: String(firstValue(draw, ['label', 'name']) ?? `Stryktipset ${drawNumber ?? ''}`).trim(),
+      label: String(firstValue(draw, ['label', 'drawComment', 'regCloseDescription', 'name']) ?? `Stryktipset ${drawNumber ?? ''}`).trim(),
       status: 'open',
       internal_deadline_at: body.internalDeadlineAt,
       official_close_at: typeof officialCloseAt === 'string' ? officialCloseAt : null,

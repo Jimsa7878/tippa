@@ -7,7 +7,7 @@ type Pick = '1' | 'X' | '2'
 type Match = { id?: string; number: number; home: string; away: string; kickoff: string; venue?: string | null; info?: string | null; picks: Record<Pick, number>; mine?: Pick }
 type Group = { id: string; name: string; join_code: string; max_members: number }
 type GroupMember = { user_id: string; display_name: string; role: 'owner' | 'admin' | 'member'; active: boolean }
-type Round = { id: string; label: string; status: string; internal_deadline_at: string; official_close_at: string | null }
+type Round = { id: string; external_draw_number: number; label: string; status: string; internal_deadline_at: string; official_close_at: string | null }
 
 const matches: Match[] = [
   { number: 1, home: 'Nottingham', away: 'Coventry', kickoff: 'Lör 18:30', picks: { '1': 3, X: 1, '2': 1 }, mine: '1' },
@@ -118,7 +118,7 @@ function App() {
     const userId = session.user.id
 
     async function loadRound() {
-      const { data: roundData } = await supabase.from('rounds').select('id, label, status, internal_deadline_at, official_close_at').eq('group_id', groupId).eq('status', 'open').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const { data: roundData } = await supabase.from('rounds').select('id, external_draw_number, label, status, internal_deadline_at, official_close_at').eq('group_id', groupId).eq('status', 'open').order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!roundData) {
         setRound(null)
         setLiveMatches(null)
@@ -210,7 +210,7 @@ function App() {
             </div>
           </article>)}
         </div> : <div className="empty-round">Ingen aktiv omgång ännu. Importera veckans matcher under fliken <strong>Kapten</strong>.</div>}
-      </> : <CaptainPanel members={groupMembers} groupId={groupId} currentUserId={session.user.id} onRoundImported={() => setRoundRefreshKey((value) => value + 1)} />}
+      </> : <CaptainPanel members={groupMembers} groupId={groupId} currentUserId={session.user.id} currentDrawNumber={round?.external_draw_number} onRoundImported={() => setRoundRefreshKey((value) => value + 1)} />}
 
       <section className="system-panel">
         <div className="panel-heading"><div><p className="eyebrow">LIVE FRÅN GRUPPEN</p><h2>Systembygget</h2></div><Receipt size={20} /></div>
@@ -269,7 +269,7 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
   )
 }
 
-function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { members: GroupMember[]; groupId: string; currentUserId: string; onRoundImported: () => void }) {
+function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, onRoundImported }: { members: GroupMember[]; groupId: string; currentUserId: string; currentDrawNumber?: number; onRoundImported: () => void }) {
   const [importing, setImporting] = useState(false)
   const [importMessage, setImportMessage] = useState('')
   const [importError, setImportError] = useState('')
@@ -278,7 +278,7 @@ function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { me
   const currentMember = members.find((member) => member.user_id === currentUserId)
   const canImport = Boolean(currentMember?.active)
 
-  async function importRound() {
+  async function importRound(drawNumber?: number) {
     setImporting(true)
     setImportMessage('')
     setImportError('')
@@ -287,7 +287,7 @@ function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { me
     deadline.setHours(14, 0, 0, 0)
 
     const { data, error } = await supabase.functions.invoke('import-svenska-spel', {
-      body: { groupId, internalDeadlineAt: deadline.toISOString() },
+      body: { groupId, internalDeadlineAt: deadline.toISOString(), ...(drawNumber ? { drawNumber } : {}) },
     })
 
     if (error) {
@@ -310,7 +310,7 @@ function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { me
     setImporting(false)
   }
 
-  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && <><p className="import-note">Alla aktiva gruppmedlemmar kan uppdatera veckans matcher.</p><button className="primary-button" onClick={importRound} disabled={importing}>{importing ? 'Importerar matcher...' : 'Importera veckans matcher'} <ChevronRight size={17} /></button>{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</>}<button className="secondary-button">Visa systemförslag <ChevronRight size={17} /></button></section>
+  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && <><p className="import-note">Alla aktiva gruppmedlemmar kan försöka ladda nästa publicerade omgång.</p><button className="primary-button" onClick={() => importRound()} disabled={importing}>{importing ? 'Importerar omgång...' : 'Importera nästa omgång'} <ChevronRight size={17} /></button>{currentDrawNumber && <button className="secondary-button" onClick={() => importRound(currentDrawNumber)} disabled={importing}>Uppdatera omgång {currentDrawNumber} <ChevronRight size={17} /></button>}{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</>}</section>
 }
 
 function GroupPanel({ group, members }: { group: Group; members: GroupMember[] }) {
