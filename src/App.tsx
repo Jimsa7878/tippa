@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Check, ChevronRight, CircleDollarSign, Clock3, Crown, Lock, LogOut, Receipt, Unlock, Users } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
@@ -56,6 +56,7 @@ function App() {
   const [groupVotes, setGroupVotes] = useState<GroupVote[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const [lockedSystem, setLockedSystem] = useState<Record<number, Pick[]> | null>(null)
+  const pendingPicks = useRef<Record<number, Pick>>({})
   const activeMatches = liveMatches ?? []
   const captain = groupMembers.find((member) => member.user_id === round?.captain_user_id) ?? groupMembers[0]
 
@@ -169,7 +170,7 @@ function App() {
         supabase.from('payments').select('user_id, amount, status').eq('round_id', roundData.id),
       ])
       const savedByMatch = new Map((predictionRows ?? []).map((prediction) => [prediction.match_id, prediction.selection as Pick]))
-      setSelected(Object.fromEntries(nextMatches.flatMap((match) => { const pick = savedByMatch.get(match.id ?? ''); return pick ? [[match.number, pick]] : [] })))
+      setSelected(Object.fromEntries(nextMatches.flatMap((match) => { const pick = pendingPicks.current[match.number] ?? savedByMatch.get(match.id ?? ''); return pick ? [[match.number, pick]] : [] })))
       setGroupVotes((allPredictionRows ?? []) as GroupVote[])
       setPayments((paymentRows ?? []).map((payment) => ({ ...payment, amount: Number(payment.amount) })) as Payment[])
     }
@@ -186,6 +187,7 @@ function App() {
 
   async function savePick(match: Match, pick: Pick) {
     if (!round || round.status !== 'open' || !match.id || !session) return
+    pendingPicks.current[match.number] = pick
     setSelected((current) => ({ ...current, [match.number]: pick }))
     setGroupVotes((current) => [...current.filter((vote) => !(vote.match_id === match.id && vote.user_id === session.user.id)), { match_id: match.id as string, user_id: session.user.id, selection: pick }])
     const { error } = await supabase.from('predictions').upsert({
@@ -195,7 +197,12 @@ function App() {
       selection: pick,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'match_id,user_id' })
-    if (error) setAuthError(`Tipset kunde inte sparas: ${error.message}`)
+    if (error) {
+      delete pendingPicks.current[match.number]
+      setAuthError(`Tipset kunde inte sparas: ${error.message}`)
+    } else if (pendingPicks.current[match.number] === pick) {
+      delete pendingPicks.current[match.number]
+    }
   }
 
   if (authLoading) return <div className="auth-loading">Laddar Tippa...</div>
