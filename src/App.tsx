@@ -191,7 +191,10 @@ function App() {
   }, [groupId, session, roundRefreshKey])
 
   async function savePick(match: Match, pick: Pick) {
-    if (!round || round.status !== 'open' || !match.id || !session) return
+    if (!round || round.status !== 'open' || !match.id || !session) {
+      setAuthError('Tipset kan inte sparas just nu. Kontrollera att omgången är öppen.')
+      return
+    }
     const previousPick = selected[match.number]
     pendingPicks.current[match.number] = pick
     setSelected((current) => ({ ...current, [match.number]: pick }))
@@ -253,7 +256,7 @@ function App() {
             <span className="match-number">{String(match.number).padStart(2, '0')}</span>
             <div className="match-info"><strong>{match.home} <b>v</b> {match.away}</strong><small>{match.kickoff}{match.venue ? ` · ${match.venue}` : ''}{match.info ? ` · ${match.info}` : ''}</small></div>
             <div className="pick-group folk-picks" aria-label={`Svenska folkets fördelning för ${match.home} mot ${match.away}`}>
-              {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => savePick(match, pick)}>{pick}<small>{match.picks[pick]}</small></button>)}
+              {(['1', 'X', '2'] as Pick[]).map((pick) => <button type="button" key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => { setAuthError(''); void savePick(match, pick) }} aria-pressed={selected[match.number] === pick}>{pick}<small>{match.picks[pick]}</small></button>)}
             </div>
             <div className="system-pick" aria-label={`Gruppens system för match ${match.number}`}><strong>{system.columns[match.number - 1]?.join('') ?? '-'}</strong></div>
             <div className="member-picks">{groupMembers.map((member) => { const vote = groupVotes.find((item) => item.match_id === match.id && item.user_id === member.user_id); return <span key={member.user_id} title={`${member.display_name}: ${vote?.selection ?? 'inte röstat'}`} className={vote ? '' : 'missing'}><b>{member.display_name.slice(0, 2).toUpperCase()}</b>{vote?.selection ?? '-'}</span> })}</div>
