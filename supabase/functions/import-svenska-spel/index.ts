@@ -145,12 +145,14 @@ Deno.serve(async (request) => {
     const body = await request.json() as { groupId?: string; drawNumber?: number; internalDeadlineAt?: string }
     if (!body.groupId || !body.internalDeadlineAt) throw new Error('groupId and internalDeadlineAt are required')
 
-    const [{ data: membership, error: membershipError }, { data: group, error: groupError }] = await Promise.all([
+    const [{ data: membership, error: membershipError }, { data: group, error: groupError }, { data: activeMembers, error: activeMembersError }] = await Promise.all([
       userClient.from('group_members').select('role, active').eq('group_id', body.groupId).eq('user_id', userData.user.id).maybeSingle(),
       userClient.from('groups').select('created_by').eq('id', body.groupId).maybeSingle(),
+      userClient.from('group_members').select('user_id').eq('group_id', body.groupId).eq('active', true),
     ])
     if (membershipError) throw new Error(`Could not read group membership: ${membershipError.message}`)
     if (groupError) throw new Error(`Could not read group: ${groupError.message}`)
+    if (activeMembersError) throw new Error(`Could not read active group members: ${activeMembersError.message}`)
     const isGroupCreator = group?.created_by === userData.user.id
     if ((!membership || !membership.active) && !isGroupCreator) throw new Error('Your current user is not an active member of this group')
 
@@ -185,6 +187,10 @@ Deno.serve(async (request) => {
     const drawNumber = Number(firstValue(draw, ['drawNumber', 'externalDrawNumber', 'number'])) || null
     const officialCloseAt = firstValue(draw, ['officialCloseAt', 'regCloseTime', 'closingTime', 'closeTime', 'spelstopp'])
     if (drawNumber === null) throw new Error('Svenska Spel API returned no draw number')
+    const { data: existingRound, error: lookupError } = await userClient.from('rounds').select('id, captain_user_id').eq('group_id', body.groupId).eq('external_draw_number', drawNumber).maybeSingle()
+    if (lookupError) throw new Error(`Could not find existing round: ${lookupError.message}`)
+    const memberIds = (activeMembers ?? []).map((member) => member.user_id)
+    const randomCaptainId = memberIds.length ? memberIds[Math.floor(Math.random() * memberIds.length)] : null
 
     const roundPayload = {
       group_id: body.groupId,
@@ -193,9 +199,8 @@ Deno.serve(async (request) => {
       status: 'open',
       internal_deadline_at: body.internalDeadlineAt,
       official_close_at: typeof officialCloseAt === 'string' ? officialCloseAt : null,
+      captain_user_id: existingRound?.captain_user_id ?? randomCaptainId,
     }
-    const { data: existingRound, error: lookupError } = await userClient.from('rounds').select('id').eq('group_id', body.groupId).eq('external_draw_number', drawNumber).maybeSingle()
-    if (lookupError) throw new Error(`Could not find existing round: ${lookupError.message}`)
 
     let round: { id: string } | null = null
     if (existingRound) {

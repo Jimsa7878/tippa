@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Check, ChevronRight, CircleDollarSign, Clock3, Crown, Lock, LogOut, Receipt, Users } from 'lucide-react'
+import { Check, ChevronRight, CircleDollarSign, Clock3, Crown, Lock, LogOut, Receipt, Unlock, Users } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 
@@ -7,7 +7,7 @@ type Pick = '1' | 'X' | '2'
 type Match = { id?: string; number: number; home: string; away: string; kickoff: string; venue?: string | null; info?: string | null; picks: Record<Pick, number>; mine?: Pick }
 type Group = { id: string; name: string; join_code: string; max_members: number }
 type GroupMember = { user_id: string; display_name: string; role: 'owner' | 'admin' | 'member'; active: boolean }
-type Round = { id: string; external_draw_number: number; label: string; status: string; internal_deadline_at: string; official_close_at: string | null; weekly_contribution: number }
+type Round = { id: string; external_draw_number: number; label: string; status: string; internal_deadline_at: string; official_close_at: string | null; weekly_contribution: number; captain_user_id: string | null }
 type GroupVote = { match_id: string; user_id: string; selection: Pick }
 type Payment = { user_id: string; amount: number; status: 'unpaid' | 'reported' | 'confirmed' | 'rejected' }
 
@@ -26,13 +26,12 @@ function App() {
   const [round, setRound] = useState<Round | null>(null)
   const [liveMatches, setLiveMatches] = useState<Match[] | null>(null)
   const [roundRefreshKey, setRoundRefreshKey] = useState(0)
-  const [activeSection, setActiveSection] = useState<'round' | 'group' | 'cash'>('round')
-  const [activeTab, setActiveTab] = useState<'tips' | 'captain'>('tips')
+  const [activeSection, setActiveSection] = useState<'round' | 'team'>('round')
   const [selected, setSelected] = useState<Record<number, Pick>>({})
   const [groupVotes, setGroupVotes] = useState<GroupVote[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
   const activeMatches = liveMatches ?? []
-  const captain = groupMembers.find((member) => member.role === 'owner') ?? groupMembers[0]
+  const captain = groupMembers.find((member) => member.user_id === round?.captain_user_id) ?? groupMembers[0]
 
   const system = useMemo(() => {
     const columns = activeMatches.map((match) => {
@@ -114,7 +113,7 @@ function App() {
     const userId = session.user.id
 
     async function loadRound() {
-      const { data: roundData } = await supabase.from('rounds').select('id, external_draw_number, label, status, internal_deadline_at, official_close_at, weekly_contribution').eq('group_id', groupId).in('status', ['open', 'locked']).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const { data: roundData } = await supabase.from('rounds').select('id, external_draw_number, label, status, internal_deadline_at, official_close_at, weekly_contribution, captain_user_id').eq('group_id', groupId).in('status', ['open', 'locked']).order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!roundData) {
         setRound(null)
         setLiveMatches(null)
@@ -196,14 +195,8 @@ function App() {
         <Clock3 size={17} /><div><span>Röstningen stänger</span><strong>TOR 23:59</strong></div><ChevronRight size={17} />
       </section>
 
-      {activeSection === 'group' ? <GroupPanel group={group} members={groupMembers} /> : activeSection === 'cash' ? <CashPanel groupId={groupId} round={round} members={groupMembers} payments={payments} currentUserId={session.user.id} onPaymentsChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
-      <nav className="tabs" aria-label="Sektioner">
-        <button className={activeTab === 'tips' ? 'active' : ''} onClick={() => setActiveTab('tips')}>MINA TECKEN <span>{savedCount}/13</span></button>
-        <button className={activeTab === 'captain' ? 'active' : ''} onClick={() => setActiveTab('captain')}>KAPTEN <span><Crown size={13} /></span></button>
-      </nav>
-
-      {activeTab === 'tips' ? <>
-        <section className="section-intro"><div><h2>Din rad</h2><p>Välj ett tecken per match. Ändra fritt fram till deadline.</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
+      {activeSection === 'team' ? <TeamPanel group={group} members={groupMembers} groupId={groupId} round={round} system={system} payments={payments} currentUserId={session.user.id} onRoundChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
+        <section className="section-intro"><div><p className="eyebrow">MINA TIPS · {savedCount}/13</p><h2>Din rad</h2><p>Välj ett tecken per match. Gruppens system byggs här under.</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
         {activeMatches.length ? <div className="match-list">
           {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
             <span className="match-number">{String(match.number).padStart(2, '0')}</span>
@@ -212,19 +205,19 @@ function App() {
               {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => savePick(match, pick)}>{pick}<small>{match.picks[pick]}</small></button>)}
             </div>
           </article>)}
-        </div> : <div className="empty-round">Ingen aktiv omgång ännu. Importera veckans matcher under fliken <strong>Kapten</strong>.</div>}
-      </> : <CaptainPanel members={groupMembers} groupId={groupId} currentUserId={session.user.id} currentDrawNumber={round?.external_draw_number} round={round} system={system} sessionUserId={session.user.id} onRoundImported={() => setRoundRefreshKey((value) => value + 1)} />}
+        </div> : <div className="empty-round">Ingen aktiv omgång ännu. Be kaptenen importera veckans matcher.</div>}
 
-      <section className="system-panel">
+      <section className="system-panel" aria-label="Gruppens system">
         <div className="panel-heading"><div><p className="eyebrow">LIVE FRÅN GRUPPEN</p><h2>Systembygget</h2></div><Receipt size={20} /></div>
         <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>System / budget</span><b>{cost.toFixed(0)} / {budget.toFixed(0)} kr</b></div></div>
         <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: `${Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%` }} /></div><b>{Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%</b></div>
         <p className="system-note">{system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgarderingar. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
+        <div className="system-columns">{system.columns.map((column, index) => <span key={index}><small>{String(index + 1).padStart(2, '0')}</small>{column.join('')}</span>)}</div>
       </section>
 
       </>}
 
-      <footer className="bottom-nav"><button className={activeSection === 'round' ? 'active' : ''} onClick={() => setActiveSection('round')}><Receipt size={18} /><span>Omgång</span></button><button className={activeSection === 'group' ? 'active' : ''} onClick={() => setActiveSection('group')}><Users size={18} /><span>Gruppen</span></button><button className={activeSection === 'cash' ? 'active' : ''} onClick={() => setActiveSection('cash')}><CircleDollarSign size={18} /><span>Kassa</span></button></footer>
+      <footer className="bottom-nav"><button className={activeSection === 'round' ? 'active' : ''} onClick={() => setActiveSection('round')}><Receipt size={18} /><span>Omgång</span></button><button className={activeSection === 'team' ? 'active' : ''} onClick={() => setActiveSection('team')}><Users size={18} /><span>Laget</span></button></footer>
     </main>
   )
 }
@@ -277,11 +270,11 @@ function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, roun
   const [importMessage, setImportMessage] = useState('')
   const [importError, setImportError] = useState('')
   const [locking, setLocking] = useState(false)
-  const captain = members.find((member) => member.role === 'owner') ?? members[0]
+  const captain = members.find((member) => member.user_id === round?.captain_user_id) ?? members[0]
 
   const currentMember = members.find((member) => member.user_id === currentUserId)
   const canImport = Boolean(currentMember?.active)
-  const canLock = currentMember?.active && (currentMember.role === 'owner' || currentMember.role === 'admin')
+  const canLock = currentMember?.active && currentMember.user_id === captain?.user_id
 
   async function importRound(drawNumber?: number) {
     setImporting(true)
@@ -341,7 +334,19 @@ function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, roun
     setLocking(false)
   }
 
-  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && round?.status === 'open' && <><p className="import-note">Alla aktiva gruppmedlemmar kan försöka ladda nästa publicerade omgång.</p><button className="primary-button" onClick={() => importRound()} disabled={importing}>{importing ? 'Importerar omgång...' : 'Importera nästa omgång'} <ChevronRight size={17} /></button>{currentDrawNumber && <button className="secondary-button" onClick={() => importRound(currentDrawNumber)} disabled={importing}>Uppdatera omgång {currentDrawNumber} <ChevronRight size={17} /></button>}</>}{round?.status === 'open' && canLock && <button className="primary-button" onClick={lockSystem} disabled={locking}><Lock size={17} />{locking ? 'Låser systemet...' : 'Lås systemet'}</button>}{round?.status === 'locked' && <p className="auth-message">Systemet är låst. Rösterna kan inte längre ändras.</p>}{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</section>
+  async function unlockSystem() {
+    if (!round || !canLock) return
+    setLocking(true)
+    const { error } = await supabase.from('rounds').update({ status: 'open' }).eq('id', round.id)
+    if (error) setImportError(error.message)
+    else {
+      setImportMessage('Systemet är upplåst. Gruppen kan ändra sina tips igen.')
+      onRoundImported()
+    }
+    setLocking(false)
+  }
+
+  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Slumpad för den här omgången. Har utslagsröst och kan låsa systemet.</p></div></div>{canImport && round?.status === 'open' && <><p className="import-note">Kaptenen importerar nästa omgång. Alla kan se och uppdatera aktuell data.</p><button className="primary-button" onClick={() => importRound()} disabled={importing}>{importing ? 'Importerar omgång...' : 'Importera nästa omgång'} <ChevronRight size={17} /></button>{currentDrawNumber && <button className="secondary-button" onClick={() => importRound(currentDrawNumber)} disabled={importing}>Uppdatera omgång {currentDrawNumber} <ChevronRight size={17} /></button>}</>}{round?.status === 'open' && canLock && <button className="primary-button" onClick={lockSystem} disabled={locking}><Lock size={17} />{locking ? 'Låser systemet...' : 'Lås systemet'}</button>}{round?.status === 'locked' && <>{canLock && <button className="secondary-button" onClick={unlockSystem} disabled={locking}><Unlock size={17} />{locking ? 'Öppnar...' : 'Lås upp systemet'}</button>}<p className="auth-message">Systemet är låst. {canLock ? 'Du kan låsa upp det om gruppen behöver ändra något.' : 'Rösterna kan inte ändras just nu.'}</p></>}{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</section>
 }
 
 function CashPanel({ groupId, round, members, payments, currentUserId, onPaymentsChanged }: { groupId: string; round: Round | null; members: GroupMember[]; payments: Payment[]; currentUserId: string; onPaymentsChanged: () => void }) {
@@ -361,16 +366,8 @@ function CashPanel({ groupId, round, members, payments, currentUserId, onPayment
   return <section className="cash-view"><div className="section-intro"><div><p className="eyebrow">SVENSKA SPEL-LAGET</p><h2>{round.weekly_contribution} kr per person</h2><p>Insatsen läggs i lagets Svenska Spel-kassa. Tippa hanterar inte själva pengarna.</p></div><CircleDollarSign size={22} /></div><div className="member-list">{members.map((member) => { const payment = payments.find((item) => item.user_id === member.user_id); const status = payment?.status ?? 'unpaid'; return <div className="payment-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className={status === 'confirmed' ? 'paid' : 'unpaid'}>{status === 'confirmed' ? 'Insats klar' : status === 'reported' ? 'Anmäld' : 'Saknas'}</span>{member.user_id === currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'reported')} disabled={saving === member.user_id}>Jag har lagt in</button>}{canConfirm && member.user_id !== currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'confirmed')} disabled={saving === member.user_id}>Bekräfta</button>}</div>})}</div></section>
 }
 
-function GroupPanel({ group, members }: { group: Group; members: GroupMember[] }) {
-  const [copied, setCopied] = useState(false)
-
-  async function copyCode() {
-    await navigator.clipboard.writeText(group.join_code)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
-  }
-
-  return <section className="group-view"><div className="group-card"><p className="eyebrow">ÖPPEN GRUPP</p><h2>{group.name}</h2><p>Skicka koden till kompisarna så kan de ansluta.</p><button className="group-code" onClick={copyCode}><span>{group.join_code}</span><small>{copied ? 'Kopierad' : 'Kopiera kod'}</small></button></div><h3>{members.length} / {group.max_members} deltagare</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="paid">{member.role === 'owner' ? 'Ägare' : 'Medlem'}</span></div>)}</div></section>
+function TeamPanel({ group, members, groupId, round, system, payments, currentUserId, onRoundChanged }: { group: Group; members: GroupMember[]; groupId: string; round: Round | null; system: { columns: Pick[][]; rows: number }; payments: Payment[]; currentUserId: string; onRoundChanged: () => void }) {
+  return <section className="team-view"><div className="group-card"><p className="eyebrow">LAGET</p><h2>{group.name}</h2><p>Fem kompisar, ett gemensamt system och 20 kr var till Svenska Spel-laget.</p><button className="group-code" onClick={async () => navigator.clipboard.writeText(group.join_code)}><span>{group.join_code}</span><small>Kopiera kod</small></button></div><CaptainPanel members={members} groupId={groupId} currentUserId={currentUserId} currentDrawNumber={round?.external_draw_number} round={round} system={system} sessionUserId={currentUserId} onRoundImported={onRoundChanged} /><CashPanel groupId={groupId} round={round} members={members} payments={payments} currentUserId={currentUserId} onPaymentsChanged={onRoundChanged} /></section>
 }
 
 export default App
