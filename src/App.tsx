@@ -30,11 +30,12 @@ function App() {
   const [selected, setSelected] = useState<Record<number, Pick>>({})
   const [groupVotes, setGroupVotes] = useState<GroupVote[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
+  const [lockedSystem, setLockedSystem] = useState<Record<number, Pick[]> | null>(null)
   const activeMatches = liveMatches ?? []
   const captain = groupMembers.find((member) => member.user_id === round?.captain_user_id) ?? groupMembers[0]
 
   const system = useMemo(() => {
-    const columns = activeMatches.map((match) => {
+    const liveColumns = activeMatches.map((match) => {
       const votes = groupVotes.filter((vote) => vote.match_id === match.id)
       const counts = (['1', 'X', '2'] as Pick[]).map((pick) => [pick, votes.filter((vote) => vote.selection === pick).length] as [Pick, number])
       const ordered = counts.sort(([, a], [, b]) => b - a)
@@ -43,8 +44,9 @@ function App() {
       if (ordered[0][1] === ordered[2][1]) return ['1', 'X', '2'] as Pick[]
       return ordered.slice(0, 2).map(([pick]) => pick)
     })
+    const columns = lockedSystem ? activeMatches.map((_, index) => lockedSystem[index + 1] ?? liveColumns[index]) : liveColumns
     return { columns, rows: columns.reduce((total, column) => total * column.length, 1) }
-  }, [activeMatches, captain?.user_id, groupVotes])
+  }, [activeMatches, captain?.user_id, groupVotes, lockedSystem])
 
   useEffect(() => {
     async function startAnonymousSession() {
@@ -115,6 +117,7 @@ function App() {
         setLiveMatches(null)
         setGroupVotes([])
         setPayments([])
+        setLockedSystem(null)
         return
       }
 
@@ -136,6 +139,12 @@ function App() {
       if (!nextMatches.length) return
       setRound(roundData as Round)
       setLiveMatches(nextMatches)
+      if (roundData.status === 'locked') {
+        const { data: savedSystem } = await supabase.from('round_systems').select('selections').eq('round_id', roundData.id).maybeSingle()
+        setLockedSystem((savedSystem?.selections ?? null) as Record<number, Pick[]> | null)
+      } else {
+        setLockedSystem(null)
+      }
 
       const [{ data: predictionRows }, { data: allPredictionRows }, { data: paymentRows }] = await Promise.all([
         supabase.from('predictions').select('match_id, selection').eq('round_id', roundData.id).eq('user_id', userId),
@@ -191,7 +200,7 @@ function App() {
         <Clock3 size={17} /><div><span>Röstningen stänger</span><strong>TOR 23:59</strong></div><ChevronRight size={17} />
       </section>
 
-      {activeSection === 'team' ? <TeamPanel group={group} members={groupMembers} groupId={groupId} round={round} system={system} payments={payments} currentUserId={session.user.id} onRoundChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
+      {activeSection === 'team' ? <TeamPanel group={group} members={groupMembers} groupId={groupId} round={round} system={system} matches={activeMatches} votes={groupVotes} payments={payments} currentUserId={session.user.id} onRoundChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
         <section className="section-intro"><div><p className="eyebrow">MINA TIPS · {savedCount}/13</p><h2>Din rad</h2><p>Välj ett tecken per match. Gruppens system byggs här under.</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
         {activeMatches.length ? <div className="match-list">
           {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
@@ -261,7 +270,7 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
   )
 }
 
-function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, round, system, sessionUserId, onRoundImported }: { members: GroupMember[]; groupId: string; currentUserId: string; currentDrawNumber?: number; round: Round | null; system: { columns: Pick[][]; rows: number }; sessionUserId: string; onRoundImported: () => void }) {
+function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, round, system, matches, votes, sessionUserId, onRoundImported }: { members: GroupMember[]; groupId: string; currentUserId: string; currentDrawNumber?: number; round: Round | null; system: { columns: Pick[][]; rows: number }; matches: Match[]; votes: GroupVote[]; sessionUserId: string; onRoundImported: () => void }) {
   const [importing, setImporting] = useState(false)
   const [importMessage, setImportMessage] = useState('')
   const [importError, setImportError] = useState('')
@@ -308,13 +317,17 @@ function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, roun
     if (!round || !canLock) return
     setLocking(true)
     setImportError('')
-    const selections = Object.fromEntries(system.columns.map((column, index) => [index + 1, column]))
+    const selections = Object.fromEntries(system.columns.map((column, index) => {
+      const captainPick = votes.find((vote) => vote.match_id === matches[index]?.id && vote.user_id === captain?.user_id)?.selection
+      return [index + 1, column.length > 1 && captainPick && column.includes(captainPick) ? [captainPick] : column]
+    }))
+    const lockedRowCount = Object.values(selections).reduce((total, column) => total * column.length, 1)
     const { error: systemError } = await supabase.from('round_systems').upsert({
       round_id: round.id,
       selections,
-      row_count: system.rows,
+      row_count: lockedRowCount,
       row_cost: 1,
-      total_cost: system.rows,
+      total_cost: lockedRowCount,
       created_by: sessionUserId,
       locked_at: new Date().toISOString(),
     })
@@ -362,8 +375,8 @@ function CashPanel({ groupId, round, members, payments, currentUserId, onPayment
   return <section className="cash-view"><div className="section-intro"><div><p className="eyebrow">SVENSKA SPEL-LAGET</p><h2>{round.weekly_contribution} kr per person</h2><p>Insatsen läggs i lagets Svenska Spel-kassa. Tippa hanterar inte själva pengarna.</p></div><CircleDollarSign size={22} /></div><div className="member-list">{members.map((member) => { const payment = payments.find((item) => item.user_id === member.user_id); const status = payment?.status ?? 'unpaid'; const isMine = member.user_id === currentUserId; return <div className="payment-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className={status === 'confirmed' ? 'paid' : 'unpaid'}>{status === 'confirmed' ? 'Insats klar' : status === 'reported' ? 'Anmäld' : 'Saknas'}</span>{isMine && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, status === 'reported' ? 'unpaid' : 'reported')} disabled={saving === member.user_id}>{status === 'reported' ? 'Markera saknas' : 'Jag har lagt in'}</button>}{canConfirm && member.user_id !== currentUserId && status === 'reported' && <button className="mini-button" onClick={() => markPaid(member, 'confirmed')} disabled={saving === member.user_id}>Bekräfta</button>}</div>})}</div></section>
 }
 
-function TeamPanel({ group, members, groupId, round, system, payments, currentUserId, onRoundChanged }: { group: Group; members: GroupMember[]; groupId: string; round: Round | null; system: { columns: Pick[][]; rows: number }; payments: Payment[]; currentUserId: string; onRoundChanged: () => void }) {
-  return <section className="team-view"><div className="group-card"><p className="eyebrow">LAGET</p><h2>{group.name}</h2><p>Fem kompisar, ett gemensamt system och 20 kr var till Svenska Spel-laget.</p><button className="group-code" onClick={async () => navigator.clipboard.writeText(group.join_code)}><span>{group.join_code}</span><small>Kopiera kod</small></button></div><CaptainPanel members={members} groupId={groupId} currentUserId={currentUserId} currentDrawNumber={round?.external_draw_number} round={round} system={system} sessionUserId={currentUserId} onRoundImported={onRoundChanged} /><CashPanel groupId={groupId} round={round} members={members} payments={payments} currentUserId={currentUserId} onPaymentsChanged={onRoundChanged} /></section>
+function TeamPanel({ group, members, groupId, round, system, matches, votes, payments, currentUserId, onRoundChanged }: { group: Group; members: GroupMember[]; groupId: string; round: Round | null; system: { columns: Pick[][]; rows: number }; matches: Match[]; votes: GroupVote[]; payments: Payment[]; currentUserId: string; onRoundChanged: () => void }) {
+  return <section className="team-view"><div className="group-card"><p className="eyebrow">LAGET</p><h2>{group.name}</h2><p>Fem kompisar, ett gemensamt system och 20 kr var till Svenska Spel-laget.</p><button className="group-code" onClick={async () => navigator.clipboard.writeText(group.join_code)}><span>{group.join_code}</span><small>Kopiera kod</small></button></div><CaptainPanel members={members} groupId={groupId} currentUserId={currentUserId} currentDrawNumber={round?.external_draw_number} round={round} system={system} matches={matches} votes={votes} sessionUserId={currentUserId} onRoundImported={onRoundChanged} /><CashPanel groupId={groupId} round={round} members={members} payments={payments} currentUserId={currentUserId} onPaymentsChanged={onRoundChanged} /></section>
 }
 
 export default App
