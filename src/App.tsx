@@ -57,6 +57,7 @@ function App() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [lockedSystem, setLockedSystem] = useState<Record<number, Pick[]> | null>(null)
   const pendingPicks = useRef<Record<number, Pick>>({})
+  const loadedRoundId = useRef<string | null>(null)
   const activeMatches = liveMatches ?? []
   const captain = groupMembers.find((member) => member.user_id === round?.captain_user_id) ?? groupMembers[0]
 
@@ -131,6 +132,7 @@ function App() {
     async function loadRound() {
       const { data: roundData } = await supabase.from('rounds').select('id, external_draw_number, label, status, internal_deadline_at, official_close_at, weekly_contribution, captain_user_id').eq('group_id', groupId).in('status', ['open', 'locked']).order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!roundData) {
+        loadedRoundId.current = null
         setRound(null)
         setLiveMatches(null)
         setGroupVotes([])
@@ -170,7 +172,10 @@ function App() {
         supabase.from('payments').select('user_id, amount, status').eq('round_id', roundData.id),
       ])
       const savedByMatch = new Map((predictionRows ?? []).map((prediction) => [prediction.match_id, prediction.selection as Pick]))
-      setSelected(Object.fromEntries(nextMatches.flatMap((match) => { const pick = pendingPicks.current[match.number] ?? savedByMatch.get(match.id ?? ''); return pick ? [[match.number, pick]] : [] })))
+      if (loadedRoundId.current !== roundData.id) {
+        setSelected(Object.fromEntries(nextMatches.flatMap((match) => { const pick = pendingPicks.current[match.number] ?? savedByMatch.get(match.id ?? ''); return pick ? [[match.number, pick]] : [] })))
+        loadedRoundId.current = roundData.id
+      }
       setGroupVotes((allPredictionRows ?? []) as GroupVote[])
       setPayments((paymentRows ?? []).map((payment) => ({ ...payment, amount: Number(payment.amount) })) as Payment[])
     }
@@ -187,6 +192,7 @@ function App() {
 
   async function savePick(match: Match, pick: Pick) {
     if (!round || round.status !== 'open' || !match.id || !session) return
+    const previousPick = selected[match.number]
     pendingPicks.current[match.number] = pick
     setSelected((current) => ({ ...current, [match.number]: pick }))
     setGroupVotes((current) => [...current.filter((vote) => !(vote.match_id === match.id && vote.user_id === session.user.id)), { match_id: match.id as string, user_id: session.user.id, selection: pick }])
@@ -199,6 +205,12 @@ function App() {
     }, { onConflict: 'match_id,user_id' })
     if (error) {
       delete pendingPicks.current[match.number]
+      setSelected((current) => {
+        const next = { ...current }
+        if (previousPick) next[match.number] = previousPick
+        else delete next[match.number]
+        return next
+      })
       setAuthError(`Tipset kunde inte sparas: ${error.message}`)
     } else if (pendingPicks.current[match.number] === pick) {
       delete pendingPicks.current[match.number]
