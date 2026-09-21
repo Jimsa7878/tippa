@@ -201,6 +201,8 @@ function App() {
       </section>
 
       {activeSection === 'team' ? <TeamPanel group={group} members={groupMembers} groupId={groupId} round={round} system={system} matches={activeMatches} votes={groupVotes} payments={payments} currentUserId={session.user.id} onRoundChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
+      <div className="round-layout">
+        <div className="personal-round">
         <section className="section-intro"><div><p className="eyebrow">MINA TIPS · {savedCount}/13</p><h2>Din rad</h2><p>Välj ett tecken per match. Gruppens system byggs här under.</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
         {activeMatches.length ? <div className="match-list">
           {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
@@ -212,13 +214,15 @@ function App() {
           </article>)}
         </div> : <div className="empty-round">Ingen aktiv omgång ännu. Be kaptenen importera veckans matcher.</div>}
 
+        </div>
       <section className="system-panel" aria-label="Gruppens system">
-        <div className="panel-heading"><div><p className="eyebrow">LIVE FRÅN GRUPPEN</p><h2>Systembygget</h2></div><Receipt size={20} /></div>
+        <div className="panel-heading"><div><h2>Systembygget</h2></div><Receipt size={20} /></div>
         <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>System / budget</span><b>{cost.toFixed(0)} / {budget.toFixed(0)} kr</b></div></div>
         <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: `${Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%` }} /></div><b>{Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%</b></div>
         <p className="system-note">{system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgarderingar. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
         <div className="system-columns">{system.columns.map((column, index) => <span key={index}><small>{String(index + 1).padStart(2, '0')}</small>{column.join('')}</span>)}</div>
       </section>
+      </div>
 
       </>}
 
