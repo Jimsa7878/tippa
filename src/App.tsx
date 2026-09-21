@@ -95,7 +95,10 @@ function App() {
         supabase.from('group_members').select('user_id, display_name, role, active').eq('group_id', groupId).eq('active', true).order('joined_at'),
       ])
 
-      if (groupResult.error || membersResult.error) {
+      if (groupResult.error?.code === 'PGRST116' || !groupResult.data) {
+        sessionStorage.removeItem('tippa-group-id')
+        setGroupId(null)
+      } else if (groupResult.error || membersResult.error) {
         setAuthError(groupResult.error?.message ?? membersResult.error?.message ?? 'Kunde inte läsa gruppen.')
       } else {
         setGroup(groupResult.data)
