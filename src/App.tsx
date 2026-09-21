@@ -99,7 +99,7 @@ function App() {
         sessionStorage.removeItem('tippa-group-id')
         setGroupId(null)
       } else if (groupResult.error || membersResult.error) {
-        setAuthError(groupResult.error?.message ?? 'Kunde inte läsa gruppen.')
+        setAuthError('Kunde inte läsa gruppen.')
       } else {
         setGroup(groupResult.data)
         setGroupMembers(membersResult.data as GroupMember[])
