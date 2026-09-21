@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Check, ChevronRight, CircleDollarSign, Clock3, Crown, LogOut, Menu, Receipt, Users } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
@@ -37,27 +37,12 @@ function leadingPick(picks: Record<Pick, number>): Pick {
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [authError, setAuthError] = useState('')
+  const [groupId, setGroupId] = useState(() => sessionStorage.getItem('tippa-group-id'))
   const [activeTab, setActiveTab] = useState<'tips' | 'captain'>('tips')
   const [selected, setSelected] = useState<Record<number, Pick>>(
     Object.fromEntries(matches.map((match) => [match.number, match.mine ?? leadingPick(match.picks)])),
   )
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setAuthLoading(false)
-    })
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession)
-      setAuthLoading(false)
-    })
-
-    return () => listener.subscription.unsubscribe()
-  }, [])
-
-  if (authLoading) return <div className="auth-loading">Laddar Tippa...</div>
-  if (!session) return <AuthScreen />
 
   const system = useMemo(() => {
     const columns = matches.map((match) => {
@@ -68,6 +53,35 @@ function App() {
     })
     return { columns, rows: columns.reduce((total, column) => total * column.length, 1) }
   }, [])
+
+  useEffect(() => {
+    async function startAnonymousSession() {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) {
+        setAuthError(error.message)
+      } else if (data.session) {
+        setSession(data.session)
+      } else {
+        const result = await supabase.auth.signInAnonymously()
+        if (result.error) setAuthError(result.error.message)
+        else setSession(result.data.session)
+      }
+      setAuthLoading(false)
+    }
+
+    startAnonymousSession()
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setAuthLoading(false)
+    })
+
+    return () => listener.subscription.unsubscribe()
+  }, [])
+
+  if (authLoading) return <div className="auth-loading">Laddar Tippa...</div>
+  if (!session) return <div className="auth-loading">{authError || 'Kunde inte starta Tippa.'}</div>
+  if (!groupId) return <GroupGate onJoined={(joinedGroupId) => { sessionStorage.setItem('tippa-group-id', joinedGroupId); setGroupId(joinedGroupId) }} />
 
   const savedCount = Object.keys(selected).length
   const cost = Math.max(1, Math.ceil(system.rows / 2))
@@ -121,25 +135,24 @@ function App() {
   )
 }
 
-function AuthScreen() {
-  const [email, setEmail] = useState('')
-  const [message, setMessage] = useState('')
+function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
+  const [mode, setMode] = useState<'join' | 'create'>('join')
+  const [name, setName] = useState('')
+  const [groupName, setGroupName] = useState('')
+  const [code, setCode] = useState('14141')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
-    setMessage('')
     setSubmitting(true)
-
-    const result = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.href },
-    })
+    const result = mode === 'join'
+      ? await supabase.rpc('join_group_by_code', { target_code: code, member_name: name })
+      : await supabase.rpc('create_group_with_code', { target_name: groupName, target_code: code, member_name: name })
 
     if (result.error) setError(result.error.message)
-    else setMessage('En inloggningslänk har skickats. Öppna länken i din e-post för att fortsätta.')
+    else onJoined(result.data)
     setSubmitting(false)
   }
 
@@ -147,15 +160,19 @@ function AuthScreen() {
     <main className="auth-shell">
       <div className="auth-brand"><span className="brand-mark">377</span><span>TIPPA</span></div>
       <section className="auth-panel">
-        <p className="eyebrow">GRUPPENS STRYKTIPS</p>
-        <h1>Logga in med länk</h1>
-        <p className="auth-intro">Skriv din e-post så skickar vi en säker engångslänk. Inget lösenord behövs.</p>
+        <p className="eyebrow">ÖPPEN GRUPP</p>
+        <h1>{mode === 'join' ? 'Anslut till gruppen' : 'Skapa en grupp'}</h1>
+        <p className="auth-intro">Använd gruppens femsiffriga kod. Ingen e-post och inget lösenord behövs.</p>
         <form onSubmit={handleSubmit}>
-          <label>E-post<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+          <label>Ditt namn<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Till exempel Jim" required /></label>
+          {mode === 'create' && <label>Gruppens namn<input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Till exempel Lördagsgänget" required /></label>}
+          <label>Gruppkod<input inputMode="numeric" pattern="[0-9]{5}" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} required /></label>
           {error && <p className="auth-error">{error}</p>}
-          {message && <p className="auth-message">{message}</p>}
-          <button className="primary-button" disabled={submitting}>{submitting ? 'Skickar...' : 'Skicka inloggningslänk'} <ChevronRight size={17} /></button>
+          <button className="primary-button" disabled={submitting}>{submitting ? 'Arbetar...' : mode === 'join' ? 'Anslut till gruppen' : 'Skapa gruppen'} <ChevronRight size={17} /></button>
         </form>
+        <button className="auth-switch" onClick={() => { setMode((current) => current === 'join' ? 'create' : 'join'); setError('') }}>
+          {mode === 'join' ? 'Skapa en ny grupp' : 'Jag har redan en gruppkod'}
+        </button>
       </section>
     </main>
   )
