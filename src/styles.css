@@ -39,4 +39,5 @@ h1, h2, h3, p { margin-top: 0; } h1 { margin-bottom: 0; font-size: clamp(28px, 7
 .auth-error { color: #e2a36a; }
 .auth-message { color: #a8d473; }
 .import-note { margin: 15px 0 -8px; color: #84968e; font-size: 12px; }
+.empty-round { margin-top: 18px; padding: 20px; border: 1px dashed #3a4a4c; color: #84968e; font-size: 13px; line-height: 1.5; }
 @media (min-width: 600px) { .app-shell { padding-left: 36px; padding-right: 36px; } .match-row { min-height: 82px; } }

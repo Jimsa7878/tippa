@@ -42,10 +42,8 @@ function App() {
   const [roundRefreshKey, setRoundRefreshKey] = useState(0)
   const [activeSection, setActiveSection] = useState<'round' | 'group' | 'cash'>('round')
   const [activeTab, setActiveTab] = useState<'tips' | 'captain'>('tips')
-  const [selected, setSelected] = useState<Record<number, Pick>>(
-    Object.fromEntries(matches.map((match) => [match.number, match.mine ?? leadingPick(match.picks)])),
-  )
-  const activeMatches = liveMatches ?? matches
+  const [selected, setSelected] = useState<Record<number, Pick>>({})
+  const activeMatches = liveMatches ?? []
 
   const system = useMemo(() => {
     const columns = activeMatches.map((match) => {
@@ -203,7 +201,7 @@ function App() {
 
       {activeTab === 'tips' ? <>
         <section className="section-intro"><div><h2>Din rad</h2><p>Välj ett tecken per match. Ändra fritt fram till deadline.</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
-        <div className="match-list">
+        {activeMatches.length ? <div className="match-list">
           {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
             <span className="match-number">{String(match.number).padStart(2, '0')}</span>
             <div className="match-info"><strong>{match.home} <b>v</b> {match.away}</strong><small>{match.kickoff}{match.venue ? ` · ${match.venue}` : ''}{match.info ? ` · ${match.info}` : ''}</small></div>
@@ -211,7 +209,7 @@ function App() {
               {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => savePick(match, pick)}>{pick}<small>{match.picks[pick]}</small></button>)}
             </div>
           </article>)}
-        </div>
+        </div> : <div className="empty-round">Ingen aktiv omgång ännu. Importera veckans matcher under fliken <strong>Kapten</strong>.</div>}
       </> : <CaptainPanel members={groupMembers} groupId={groupId} currentUserId={session.user.id} onRoundImported={() => setRoundRefreshKey((value) => value + 1)} />}
 
       <section className="system-panel">
