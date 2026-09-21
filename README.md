@@ -27,6 +27,21 @@ Kör migrationerna i `supabase/migrations` mot projektet. Frontend ska endast an
 
 API-svaret för en omgång innehåller 13 `drawEvents`, lag, matchstart, spelstopp, resultat, odds och Svenska Folkets fördelning. Importen ska köras server-side via Edge Function, spara en normaliserad kopia och ha manuell fallback om draw discovery eller villkor förändras.
 
+Edge Function-importen finns i `supabase/functions/import-svenska-spel`. Konfigurera följande secrets i Supabase innan deploy:
+
+```text
+SVENSKA_SPEL_API_URL=https://...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+Deploya funktionen med Supabase CLI:
+
+```powershell
+supabase functions deploy import-svenska-spel
+```
+
+Anropet kräver en inloggad gruppägare/admin och JSON med `groupId` och `internalDeadlineAt`. Funktionen kräver exakt 13 matcher och sparar dem till `rounds` och `matches`.
+
 ## GitHub Pages
 
 Lägg GitHub Actions-secrets `VITE_SUPABASE_URL` och `VITE_SUPABASE_ANON_KEY` i repositoryts `github-pages` environment. Aktivera Pages med GitHub Actions som källa.
