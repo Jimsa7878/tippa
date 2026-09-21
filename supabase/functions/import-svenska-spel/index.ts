@@ -13,6 +13,8 @@ type NormalizedMatch = {
   homeTeam: string
   awayTeam: string
   kickoffAt: string | null
+  venue: string | null
+  info: string | null
   result: '1' | 'X' | '2' | null
   svenskaFolket: unknown
 }
@@ -52,6 +54,8 @@ function normalizeEvent(eventValue: unknown, index: number): NormalizedMatch {
   const homeTeam = asText(home) ?? asText(firstValue(event, ['homeTeamName', 'homeName'])) ?? 'Okant hemmalag'
   const awayTeam = asText(away) ?? asText(firstValue(event, ['awayTeamName', 'awayName'])) ?? 'Okant bortalag'
   const kickoff = firstValue(event, ['kickoffAt', 'matchStart', 'startTime', 'kickoff'])
+  const venue = asText(firstValue(event, ['venue', 'stadium', 'arena', 'venueName']))
+  const info = asText(firstValue(event, ['info', 'matchInfo', 'competition', 'league']))
   const result = asResult(firstValue(event, ['result', 'outcome', 'sign']))
   const svenskaFolket = firstValue(event, ['svenskaFolket', 'publicDistribution', 'folketsFordelning', 'distribution'])
 
@@ -61,6 +65,8 @@ function normalizeEvent(eventValue: unknown, index: number): NormalizedMatch {
     homeTeam,
     awayTeam,
     kickoffAt: typeof kickoff === 'string' ? kickoff : null,
+    venue,
+    info,
     result,
     svenskaFolket,
   }
@@ -110,7 +116,7 @@ Deno.serve(async (request) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey)
     const { data: membership } = await admin.from('group_members').select('role').eq('group_id', body.groupId).eq('user_id', userData.user.id).eq('active', true).maybeSingle()
-    if (!membership || !['owner', 'admin'].includes(membership.role)) throw new Error('Only group owners and admins can import rounds')
+    if (!membership) throw new Error('Only active group members can import rounds')
 
     const upstreamResponse = await fetch(apiUrl, { headers: { Accept: 'application/json' } })
     if (!upstreamResponse.ok) throw new Error(`Svenska Spel API returned ${upstreamResponse.status}`)
@@ -137,6 +143,8 @@ Deno.serve(async (request) => {
       home_team: event.homeTeam,
       away_team: event.awayTeam,
       kickoff_at: event.kickoffAt,
+      venue: event.venue,
+      match_info: event.info,
       result: event.result,
       svenska_folket: event.svenskaFolket,
     }))

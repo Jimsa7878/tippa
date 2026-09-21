@@ -4,7 +4,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 
 type Pick = '1' | 'X' | '2'
-type Match = { id?: string; number: number; home: string; away: string; kickoff: string; picks: Record<Pick, number>; mine?: Pick }
+type Match = { id?: string; number: number; home: string; away: string; kickoff: string; venue?: string | null; info?: string | null; picks: Record<Pick, number>; mine?: Pick }
 type Group = { id: string; name: string; join_code: string; max_members: number }
 type GroupMember = { user_id: string; display_name: string; role: 'owner' | 'admin' | 'member'; active: boolean }
 type Round = { id: string; label: string; status: string; internal_deadline_at: string; official_close_at: string | null }
@@ -113,7 +113,7 @@ function App() {
     }
 
     loadGroup()
-  }, [groupId, session, roundRefreshKey])
+  }, [groupId, session])
 
   useEffect(() => {
     if (!session || !groupId) return
@@ -127,7 +127,7 @@ function App() {
         return
       }
 
-      const { data: matchRows } = await supabase.from('matches').select('id, match_number, home_team, away_team, kickoff_at, svenska_folket').eq('round_id', roundData.id).order('match_number')
+      const { data: matchRows } = await supabase.from('matches').select('id, match_number, home_team, away_team, kickoff_at, venue, match_info, svenska_folket').eq('round_id', roundData.id).order('match_number')
       const nextMatches = (matchRows ?? []).map((match) => {
         const folk = (match.svenska_folket ?? {}) as Partial<Record<Pick, number>>
         return {
@@ -136,6 +136,8 @@ function App() {
           home: match.home_team,
           away: match.away_team,
           kickoff: match.kickoff_at ? new Date(match.kickoff_at).toLocaleString('sv-SE', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'Tid ej satt',
+          venue: match.venue,
+          info: match.match_info,
           picks: { '1': Number(folk['1'] ?? 0), X: Number(folk.X ?? 0), '2': Number(folk['2'] ?? 0) },
         }
       })
@@ -150,7 +152,7 @@ function App() {
     }
 
     loadRound()
-  }, [groupId, session])
+  }, [groupId, session, roundRefreshKey])
 
   async function savePick(match: Match, pick: Pick) {
     setSelected((current) => ({ ...current, [match.number]: pick }))
@@ -177,7 +179,7 @@ function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-lockup"><span className="brand-mark">377</span><span>TIPPA</span></div>
+        <div className="brand-lockup"><span className="brand-mark">377</span><span>TIPPA</span><span className="user-identity">Du: {groupMembers.find((member) => member.user_id === session.user.id)?.display_name ?? 'Spelare'}</span></div>
         <button className="icon-button" aria-label="Logga ut" onClick={() => supabase.auth.signOut()}><LogOut size={19} /></button>
       </header>
 
@@ -204,7 +206,7 @@ function App() {
         <div className="match-list">
           {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
             <span className="match-number">{String(match.number).padStart(2, '0')}</span>
-            <div className="match-info"><strong>{match.home}</strong><span>{match.away}</span><small>{match.kickoff}</small></div>
+            <div className="match-info"><strong>{match.home} <b>v</b> {match.away}</strong><small>{match.kickoff}{match.venue ? ` · ${match.venue}` : ''}{match.info ? ` · ${match.info}` : ''}</small></div>
             <div className="pick-group" aria-label={`Välj tecken för ${match.home} mot ${match.away}`}>
               {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => savePick(match, pick)}>{pick}<small>{match.picks[pick]}</small></button>)}
             </div>
@@ -276,7 +278,7 @@ function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { me
   const captain = members.find((member) => member.role === 'owner') ?? members[0]
 
   const currentMember = members.find((member) => member.user_id === currentUserId)
-  const canImport = currentMember?.role === 'owner' || currentMember?.role === 'admin'
+  const canImport = Boolean(currentMember?.active)
 
   async function importRound() {
     setImporting(true)
@@ -310,7 +312,7 @@ function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { me
     setImporting(false)
   }
 
-  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && <><button className="primary-button" onClick={importRound} disabled={importing}>{importing ? 'Importerar matcher...' : 'Importera veckans matcher'} <ChevronRight size={17} /></button>{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</>}<button className="secondary-button">Visa systemförslag <ChevronRight size={17} /></button></section>
+  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && <><p className="import-note">Alla aktiva gruppmedlemmar kan uppdatera veckans matcher.</p><button className="primary-button" onClick={importRound} disabled={importing}>{importing ? 'Importerar matcher...' : 'Importera veckans matcher'} <ChevronRight size={17} /></button>{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</>}<button className="secondary-button">Visa systemförslag <ChevronRight size={17} /></button></section>
 }
 
 function GroupPanel({ group, members }: { group: Group; members: GroupMember[] }) {
