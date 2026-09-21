@@ -425,7 +425,30 @@ function CashPanel({ groupId, round, members, payments, currentUserId, onPayment
 }
 
 function TeamPanel({ group, members, groupId, round, system, matches, votes, payments, currentUserId, onRoundChanged }: { group: Group; members: GroupMember[]; groupId: string; round: Round | null; system: { columns: Pick[][]; rows: number }; matches: Match[]; votes: GroupVote[]; payments: Payment[]; currentUserId: string; onRoundChanged: () => void }) {
-  return <section className="team-view"><div className="group-card"><p className="eyebrow">LAGET</p><h2>{group.name}</h2><p>Fem kompisar, ett gemensamt system och 20 kr var till Svenska Spel-laget.</p><button className="group-code" onClick={async () => navigator.clipboard.writeText(group.join_code)}><span>{group.join_code}</span><small>Kopiera kod</small></button></div><CaptainPanel members={members} groupId={groupId} currentUserId={currentUserId} currentDrawNumber={round?.external_draw_number} round={round} system={system} matches={matches} votes={votes} sessionUserId={currentUserId} onRoundImported={onRoundChanged} /><CashPanel groupId={groupId} round={round} members={members} payments={payments} currentUserId={currentUserId} onPaymentsChanged={onRoundChanged} /></section>
+  return <section className="team-view"><div className="group-card"><p className="eyebrow">LAGET</p><h2>{group.name}</h2><p>Fem kompisar, ett gemensamt system och 20 kr var till Svenska Spel-laget.</p><button className="group-code" onClick={async () => navigator.clipboard.writeText(group.join_code)}><span>{group.join_code}</span><small>Kopiera kod</small></button></div><PinPanel /><CaptainPanel members={members} groupId={groupId} currentUserId={currentUserId} currentDrawNumber={round?.external_draw_number} round={round} system={system} matches={matches} votes={votes} sessionUserId={currentUserId} onRoundImported={onRoundChanged} /><CashPanel groupId={groupId} round={round} members={members} payments={payments} currentUserId={currentUserId} onPaymentsChanged={onRoundChanged} /></section>
+}
+
+function PinPanel() {
+  const [pin, setPin] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function savePin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setMessage('')
+    setError('')
+    setSaving(true)
+    const { error: saveError } = await supabase.rpc('set_member_pin', { target_pin: pin })
+    if (saveError) setError(saveError.message)
+    else {
+      setMessage('PIN sparad. Använd den tillsammans med namn och gruppkod på andra enheter.')
+      setPin('')
+    }
+    setSaving(false)
+  }
+
+  return <section className="pin-card"><p className="eyebrow">DIN INLOGGNING</p><h2>Skapa eller ändra PIN</h2><p>PIN:en behövs när du öppnar Tippa på en ny mobil eller dator.</p><form onSubmit={savePin}><input aria-label="Din fyrsiffriga PIN" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, ''))} placeholder="Fyra siffror" autoComplete="off" required /><button className="mini-button" disabled={saving}>{saving ? 'Sparar...' : 'Spara PIN'}</button></form>{error && <p className="auth-error">{error}</p>}{message && <p className="auth-message">{message}</p>}</section>
 }
 
 function TeamInsights({ matches, members, votes, system }: { matches: Match[]; members: GroupMember[]; votes: GroupVote[]; system: { columns: Pick[][]; rows: number } }) {
