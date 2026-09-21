@@ -5,6 +5,8 @@ import { supabase } from './lib/supabase'
 
 type Pick = '1' | 'X' | '2'
 type Match = { number: number; home: string; away: string; kickoff: string; picks: Record<Pick, number>; mine?: Pick }
+type Group = { id: string; name: string; join_code: string; max_members: number }
+type GroupMember = { user_id: string; display_name: string; role: 'owner' | 'admin' | 'member'; active: boolean }
 
 const matches: Match[] = [
   { number: 1, home: 'Nottingham', away: 'Coventry', kickoff: 'Lör 18:30', picks: { '1': 3, X: 1, '2': 1 }, mine: '1' },
@@ -22,14 +24,6 @@ const matches: Match[] = [
   { number: 13, home: 'Sheffield W', away: 'Stockport', kickoff: 'Lör 16:00', picks: { '1': 1, X: 1, '2': 3 }, mine: '2' },
 ]
 
-const members = [
-  { name: 'Du', initials: 'DU', picked: true, paid: true },
-  { name: 'Micke', initials: 'MI', picked: true, paid: true },
-  { name: 'Sara', initials: 'SA', picked: true, paid: false },
-  { name: 'Johan', initials: 'JO', picked: false, paid: true },
-  { name: 'Nina', initials: 'NI', picked: true, paid: true },
-]
-
 function leadingPick(picks: Record<Pick, number>): Pick {
   return (Object.entries(picks).sort(([, a], [, b]) => b - a)[0]?.[0] ?? 'X') as Pick
 }
@@ -39,6 +33,10 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState('')
   const [groupId, setGroupId] = useState(() => sessionStorage.getItem('tippa-group-id'))
+  const [group, setGroup] = useState<Group | null>(null)
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([])
+  const [groupLoading, setGroupLoading] = useState(false)
+  const [activeSection, setActiveSection] = useState<'round' | 'group' | 'cash'>('round')
   const [activeTab, setActiveTab] = useState<'tips' | 'captain'>('tips')
   const [selected, setSelected] = useState<Record<number, Pick>>(
     Object.fromEntries(matches.map((match) => [match.number, match.mine ?? leadingPick(match.picks)])),
@@ -87,9 +85,33 @@ function App() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
+  useEffect(() => {
+    if (!session || !groupId) return
+
+    async function loadGroup() {
+      setGroupLoading(true)
+      const [groupResult, membersResult] = await Promise.all([
+        supabase.from('groups').select('id, name, join_code, max_members').eq('id', groupId).single(),
+        supabase.from('group_members').select('user_id, display_name, role, active').eq('group_id', groupId).eq('active', true).order('joined_at'),
+      ])
+
+      if (groupResult.error || membersResult.error) {
+        setAuthError(groupResult.error?.message ?? membersResult.error?.message ?? 'Kunde inte läsa gruppen.')
+      } else {
+        setGroup(groupResult.data)
+        setGroupMembers(membersResult.data as GroupMember[])
+      }
+      setGroupLoading(false)
+    }
+
+    loadGroup()
+  }, [groupId, session])
+
   if (authLoading) return <div className="auth-loading">Laddar Tippa...</div>
   if (!session) return <div className="auth-loading">{authError || 'Kunde inte starta Tippa.'}</div>
   if (!groupId) return <GroupGate onJoined={(joinedGroupId) => { sessionStorage.setItem('tippa-group-id', joinedGroupId); setGroupId(joinedGroupId) }} />
+  if (groupLoading) return <div className="auth-loading">Laddar gruppen...</div>
+  if (!group) return <div className="auth-loading">{authError || 'Gruppen kunde inte hittas.'}</div>
 
   const savedCount = Object.keys(selected).length
   const cost = Math.max(1, Math.ceil(system.rows / 2))
@@ -103,7 +125,7 @@ function App() {
 
       <section className="page-heading">
         <div>
-          <p className="eyebrow">STRYKTIPSET · VECKA 38</p>
+          <p className="eyebrow">{group.name.toUpperCase()} · VECKA 38</p>
           <h1>Veckans system</h1>
         </div>
         <div className="round-badge"><span>STATUS</span><strong>ÖPPEN</strong></div>
@@ -113,6 +135,7 @@ function App() {
         <Clock3 size={17} /><div><span>Röstningen stänger</span><strong>TOR 23:59</strong></div><ChevronRight size={17} />
       </section>
 
+      {activeSection === 'group' ? <GroupPanel group={group} members={groupMembers} /> : <>
       <nav className="tabs" aria-label="Sektioner">
         <button className={activeTab === 'tips' ? 'active' : ''} onClick={() => setActiveTab('tips')}>MINA TECKEN <span>{savedCount}/13</span></button>
         <button className={activeTab === 'captain' ? 'active' : ''} onClick={() => setActiveTab('captain')}>KAPTEN <span><Crown size={13} /></span></button>
@@ -129,7 +152,7 @@ function App() {
             </div>
           </article>)}
         </div>
-      </> : <CaptainPanel />}
+      </> : <CaptainPanel members={groupMembers} />}
 
       <section className="system-panel">
         <div className="panel-heading"><div><p className="eyebrow">LIVE FRÅN GRUPPEN</p><h2>Systembygget</h2></div><Receipt size={20} /></div>
@@ -138,7 +161,9 @@ function App() {
         <p className="system-note">Spikar på majoriteten, gardering där gruppen tvekar. Kaptenen avgör vid lika röst.</p>
       </section>
 
-      <footer className="bottom-nav"><button className="active"><Receipt size={18} /><span>Omgång</span></button><button><Users size={18} /><span>Gruppen</span></button><button><CircleDollarSign size={18} /><span>Kassa</span></button></footer>
+      </>}
+
+      <footer className="bottom-nav"><button className={activeSection === 'round' ? 'active' : ''} onClick={() => setActiveSection('round')}><Receipt size={18} /><span>Omgång</span></button><button className={activeSection === 'group' ? 'active' : ''} onClick={() => setActiveSection('group')}><Users size={18} /><span>Gruppen</span></button><button className={activeSection === 'cash' ? 'active' : ''} onClick={() => setActiveSection('cash')}><CircleDollarSign size={18} /><span>Kassa</span></button></footer>
     </main>
   )
 }
@@ -186,8 +211,21 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
   )
 }
 
-function CaptainPanel() {
-  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>Johan</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.name}><span className="avatar">{member.initials}</span><strong>{member.name}</strong><span className={member.picked ? 'status done' : 'status'}>{member.picked ? 'Röstat' : 'Saknas'}</span><span className={member.paid ? 'paid' : 'unpaid'}>{member.paid ? 'Betalt' : 'Ej betalt'}</span></div>)}</div><button className="primary-button">Visa systemförslag <ChevronRight size={17} /></button></section>
+function CaptainPanel({ members }: { members: GroupMember[] }) {
+  const captain = members.find((member) => member.role === 'owner') ?? members[0]
+  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div><button className="primary-button">Visa systemförslag <ChevronRight size={17} /></button></section>
+}
+
+function GroupPanel({ group, members }: { group: Group; members: GroupMember[] }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copyCode() {
+    await navigator.clipboard.writeText(group.join_code)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1600)
+  }
+
+  return <section className="group-view"><div className="group-card"><p className="eyebrow">ÖPPEN GRUPP</p><h2>{group.name}</h2><p>Skicka koden till kompisarna så kan de ansluta.</p><button className="group-code" onClick={copyCode}><span>{group.join_code}</span><small>{copied ? 'Kopierad' : 'Kopiera kod'}</small></button></div><h3>{members.length} / {group.max_members} deltagare</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="paid">{member.role === 'owner' ? 'Ägare' : 'Medlem'}</span></div>)}</div></section>
 }
 
 export default App
