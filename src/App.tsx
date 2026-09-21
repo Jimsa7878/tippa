@@ -291,7 +291,16 @@ function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { me
     })
 
     if (error) {
-      setImportError(error.message)
+      let message = error.message
+      if (error.context instanceof Response) {
+        try {
+          const details = await error.context.json() as { error?: string }
+          message = details.error ?? message
+        } catch {
+          // Keep the client error when the function response is not JSON.
+        }
+      }
+      setImportError(message)
     } else if (data?.error) {
       setImportError(data.error)
     } else {
