@@ -44,7 +44,7 @@ supabase functions deploy import-svenska-spel
 
 ## System och kassa
 
-Gruppens system räknas från medlemmarnas egna tips och visas direkt under den egna raden för alla. En tydlig majoritet blir spik, två delade tecken blir halvgardering och tre delade tecken blir helgardering. Systemkostnaden räknas som en krona per rad. Varje ny omgång får en slumpad aktiv kapten som avgör vid låsning och kan låsa eller låsa upp systemet; efter låsning går tipsen inte längre att ändra.
+Gruppens system räknas från medlemmarnas egna tips och visas direkt under den egna raden för alla. Systemet har alltid 96 rader: en helgardering, fem halvgarderingar och sju spikar. De mest osäkra matcherna får garderingarna, tecknen visas alltid i ordningen 1X2 och samma systemstorlek används oavsett om en eller flera personer har röstat. Systemkostnaden räknas som en krona per rad. Varje ny omgång får en slumpad aktiv kapten som avgör vid låsning och kan låsa eller låsa upp systemet; efter låsning går tipsen inte längre att ändra.
 
 Kassan ligger i Svenska Spel-laget i stället för i Tippa. Varje omgång har ett fast bidrag per person, som standard 20 kr. Tippa visar gruppens budget och systemkostnad, medan kaptenen lämnar in systemet och hanterar det faktiska saldot i Svenska Spels app. Medlemmar kan själva markera sin insats som klar och kaptenen kan bekräfta den. Grupp, kapten och insatsstatus finns samlat under Laget. Tippa hanterar inte pengar eller automatisk spelinlämning.
 

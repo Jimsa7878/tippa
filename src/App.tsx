@@ -15,6 +15,31 @@ function leadingPick(picks: Record<Pick, number>): Pick {
   return (Object.entries(picks).sort(([, a], [, b]) => b - a)[0]?.[0] ?? 'X') as Pick
 }
 
+const pickOrder: Pick[] = ['1', 'X', '2']
+
+function buildSystemColumns(matches: Match[], votes: GroupVote[]) {
+  const rankedMatches = matches.map((match, index) => {
+    const matchVotes = votes.filter((vote) => vote.match_id === match.id)
+    const counts = Object.fromEntries(pickOrder.map((pick) => [pick, matchVotes.filter((vote) => vote.selection === pick).length])) as Record<Pick, number>
+    const ordered = pickOrder.slice().sort((left, right) => counts[right] - counts[left] || match.picks[right] - match.picks[left] || pickOrder.indexOf(left) - pickOrder.indexOf(right))
+    const total = matchVotes.length || 1
+    const topCount = counts[ordered[0]]
+    const spread = matchVotes.length ? (total - topCount) / total : (match.picks[ordered[0]] + match.picks[ordered[1]]) / 100
+    return { index, ordered, spread }
+  }).sort((left, right) => right.spread - left.spread || left.index - right.index)
+
+  const fullIndex = rankedMatches[0]?.index
+  const halfIndexes = new Set(rankedMatches.slice(1, 6).map((match) => match.index))
+  return matches.map((match, index) => {
+    const matchVotes = votes.filter((vote) => vote.match_id === match.id)
+    const counts = Object.fromEntries(pickOrder.map((pick) => [pick, matchVotes.filter((vote) => vote.selection === pick).length])) as Record<Pick, number>
+    const ordered = pickOrder.slice().sort((left, right) => counts[right] - counts[left] || match.picks[right] - match.picks[left] || pickOrder.indexOf(left) - pickOrder.indexOf(right))
+    if (index === fullIndex) return pickOrder
+    if (halfIndexes.has(index)) return [ordered[0], ordered[1]].sort((left, right) => pickOrder.indexOf(left) - pickOrder.indexOf(right))
+    return [ordered[0]]
+  })
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -35,18 +60,10 @@ function App() {
   const captain = groupMembers.find((member) => member.user_id === round?.captain_user_id) ?? groupMembers[0]
 
   const system = useMemo(() => {
-    const liveColumns = activeMatches.map((match) => {
-      const votes = groupVotes.filter((vote) => vote.match_id === match.id)
-      const counts = (['1', 'X', '2'] as Pick[]).map((pick) => [pick, votes.filter((vote) => vote.selection === pick).length] as [Pick, number])
-      const ordered = counts.sort(([, a], [, b]) => b - a)
-      if (!votes.length) return [leadingPick(match.picks)]
-      if (ordered[0][1] - ordered[1][1] >= 2) return [ordered[0][0]]
-      if (ordered[0][1] === ordered[2][1]) return ['1', 'X', '2'] as Pick[]
-      return ordered.slice(0, 2).map(([pick]) => pick)
-    })
+    const liveColumns = buildSystemColumns(activeMatches, groupVotes)
     const columns = lockedSystem ? activeMatches.map((_, index) => lockedSystem[index + 1] ?? liveColumns[index]) : liveColumns
     return { columns, rows: columns.reduce((total, column) => total * column.length, 1) }
-  }, [activeMatches, captain?.user_id, groupVotes, lockedSystem])
+  }, [activeMatches, groupVotes, lockedSystem])
 
   useEffect(() => {
     async function startAnonymousSession() {
@@ -152,7 +169,7 @@ function App() {
         supabase.from('payments').select('user_id, amount, status').eq('round_id', roundData.id),
       ])
       const savedByMatch = new Map((predictionRows ?? []).map((prediction) => [prediction.match_id, prediction.selection as Pick]))
-      setSelected(Object.fromEntries(nextMatches.map((match) => [match.number, savedByMatch.get(match.id ?? '') ?? leadingPick(match.picks)])))
+      setSelected(Object.fromEntries(nextMatches.flatMap((match) => { const pick = savedByMatch.get(match.id ?? ''); return pick ? [[match.number, pick]] : [] })))
       setGroupVotes((allPredictionRows ?? []) as GroupVote[])
       setPayments((paymentRows ?? []).map((payment) => ({ ...payment, amount: Number(payment.amount) })) as Payment[])
     }
@@ -221,7 +238,7 @@ function App() {
         <div className="panel-heading"><div><h2>Systembygget</h2></div><Receipt size={20} /></div>
         <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>System / budget</span><b>{cost.toFixed(0)} / {budget.toFixed(0)} kr</b></div></div>
         <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: `${Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%` }} /></div><b>{Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%</b></div>
-        <p className="system-note">{system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgarderingar. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
+        <p className="system-note">Fast 96-raderssystem: {system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgardering. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
       </section>
       </div>
       <SnackisPanel members={groupMembers} matches={activeMatches} votes={groupVotes} system={system} />
