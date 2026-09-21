@@ -95,12 +95,19 @@ function extractEvents(draw: JsonRecord): unknown[] {
   return []
 }
 
+async function fetchJson(url: string): Promise<unknown> {
+  const response = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new Error(`Svenska Spel API returned ${response.status}`)
+  return response.json()
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const apiUrl = Deno.env.get('SVENSKA_SPEL_API_URL')
+    const drawsUrl = Deno.env.get('SVENSKA_SPEL_DRAWS_URL')
     if (!supabaseUrl || !apiUrl) throw new Error('Importer secrets are not configured')
 
     const authorization = request.headers.get('Authorization')
@@ -122,9 +129,18 @@ Deno.serve(async (request) => {
     const isGroupCreator = group?.created_by === userData.user.id
     if ((!membership || !membership.active) && !isGroupCreator) throw new Error('Your current user is not an active member of this group')
 
-    const upstreamResponse = await fetch(apiUrl, { headers: { Accept: 'application/json' } })
-    if (!upstreamResponse.ok) throw new Error(`Svenska Spel API returned ${upstreamResponse.status}`)
-    const draw = findDraw(await upstreamResponse.json(), body.drawNumber)
+    let draw: JsonRecord
+    if (drawsUrl) {
+      try {
+        draw = findDraw(await fetchJson(drawsUrl), body.drawNumber)
+        if (extractEvents(draw).length !== 13) throw new Error('Draw discovery returned no complete 13-match draw')
+      } catch (discoveryError) {
+        if (body.drawNumber === undefined) throw discoveryError
+        draw = findDraw(await fetchJson(apiUrl), body.drawNumber)
+      }
+    } else {
+      draw = findDraw(await fetchJson(apiUrl), body.drawNumber)
+    }
     const events = extractEvents(draw).map(normalizeEvent).sort((left, right) => left.matchNumber - right.matchNumber)
     if (events.length !== 13) throw new Error(`Expected 13 draw events, received ${events.length}`)
 

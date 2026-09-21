@@ -31,7 +31,7 @@ Edge Function-importen finns i `supabase/functions/import-svenska-spel`. Konfigu
 
 ```text
 SVENSKA_SPEL_API_URL=https://...
-SUPABASE_SERVICE_ROLE_KEY=...
+SVENSKA_SPEL_DRAWS_URL=https://.../draws
 ```
 
 Deploya funktionen med Supabase CLI:
@@ -40,7 +40,7 @@ Deploya funktionen med Supabase CLI:
 supabase functions deploy import-svenska-spel
 ```
 
-Anropet kräver en inloggad gruppägare/admin och JSON med `groupId` och `internalDeadlineAt`. Funktionen kräver exakt 13 matcher och sparar dem till `rounds` och `matches`.
+`SVENSKA_SPEL_DRAWS_URL` är valfri. Om den finns används den för att hitta aktuell komplett omgång; annars används `SVENSKA_SPEL_API_URL` som manuell fallback. Anropet kräver en inloggad gruppmedlem och JSON med `groupId` och `internalDeadlineAt`. Funktionen kräver exakt 13 matcher och sparar dem till `rounds` och `matches`.
 
 ## GitHub Pages
 
