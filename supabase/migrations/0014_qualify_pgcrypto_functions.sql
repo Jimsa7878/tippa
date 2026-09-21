@@ -1,9 +1,3 @@
-alter table public.group_members
-  add column if not exists pin_hash text;
-
-drop function if exists public.create_group_with_code(text, text, text);
-drop function if exists public.join_group_by_code(text, text);
-
 create or replace function public.create_group_with_code(
   target_name text,
   target_code text,

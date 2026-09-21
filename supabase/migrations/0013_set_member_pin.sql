@@ -14,7 +14,7 @@ begin
   end if;
 
   update public.group_members
-  set pin_hash = crypt(target_pin, gen_salt('bf'))
+  set pin_hash = extensions.crypt(target_pin, extensions.gen_salt('bf'))
   where user_id = auth.uid() and active;
 
   if not found then
