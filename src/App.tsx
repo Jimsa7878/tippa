@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Check, ChevronRight, CircleDollarSign, Clock3, Crown, LogOut, Menu, Receipt, Users } from 'lucide-react'
+import { Check, ChevronRight, CircleDollarSign, Clock3, Crown, Lock, LogOut, Receipt, Users } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 
@@ -7,23 +7,9 @@ type Pick = '1' | 'X' | '2'
 type Match = { id?: string; number: number; home: string; away: string; kickoff: string; venue?: string | null; info?: string | null; picks: Record<Pick, number>; mine?: Pick }
 type Group = { id: string; name: string; join_code: string; max_members: number }
 type GroupMember = { user_id: string; display_name: string; role: 'owner' | 'admin' | 'member'; active: boolean }
-type Round = { id: string; external_draw_number: number; label: string; status: string; internal_deadline_at: string; official_close_at: string | null }
-
-const matches: Match[] = [
-  { number: 1, home: 'Nottingham', away: 'Coventry', kickoff: 'Lör 18:30', picks: { '1': 3, X: 1, '2': 1 }, mine: '1' },
-  { number: 2, home: 'Brighton', away: 'Arsenal', kickoff: 'Lör 16:00', picks: { '1': 1, X: 1, '2': 3 }, mine: '2' },
-  { number: 3, home: 'Everton', away: 'Ipswich', kickoff: 'Lör 16:00', picks: { '1': 4, X: 1, '2': 0 }, mine: '1' },
-  { number: 4, home: 'Newcastle', away: 'Hull', kickoff: 'Lör 16:00', picks: { '1': 3, X: 1, '2': 1 }, mine: '1' },
-  { number: 5, home: 'Birmingham', away: 'Middlesbrough', kickoff: 'Lör 16:00', picks: { '1': 1, X: 2, '2': 2 }, mine: 'X' },
-  { number: 6, home: 'Burnley', away: 'Derby', kickoff: 'Lör 16:00', picks: { '1': 3, X: 1, '2': 1 }, mine: '1' },
-  { number: 7, home: 'Lincoln', away: 'Swansea', kickoff: 'Lör 16:00', picks: { '1': 1, X: 2, '2': 2 }, mine: 'X' },
-  { number: 8, home: 'Portsmouth', away: 'Blackburn', kickoff: 'Lör 16:00', picks: { '1': 2, X: 2, '2': 1 }, mine: '1' },
-  { number: 9, home: 'QPR', away: 'Preston', kickoff: 'Lör 16:00', picks: { '1': 4, X: 1, '2': 0 }, mine: '1' },
-  { number: 10, home: 'Wrexham', away: 'Southampton', kickoff: 'Lör 16:00', picks: { '1': 2, X: 1, '2': 2 }, mine: 'X' },
-  { number: 11, home: 'Luton', away: 'Bradford', kickoff: 'Lör 16:00', picks: { '1': 2, X: 2, '2': 1 }, mine: 'X' },
-  { number: 12, home: 'Oxford', away: 'Cambridge', kickoff: 'Lör 16:00', picks: { '1': 2, X: 2, '2': 1 }, mine: '1' },
-  { number: 13, home: 'Sheffield W', away: 'Stockport', kickoff: 'Lör 16:00', picks: { '1': 1, X: 1, '2': 3 }, mine: '2' },
-]
+type Round = { id: string; external_draw_number: number; label: string; status: string; internal_deadline_at: string; official_close_at: string | null; weekly_contribution: number }
+type GroupVote = { match_id: string; user_id: string; selection: Pick }
+type Payment = { user_id: string; amount: number; status: 'unpaid' | 'reported' | 'confirmed' | 'rejected' }
 
 function leadingPick(picks: Record<Pick, number>): Pick {
   return (Object.entries(picks).sort(([, a], [, b]) => b - a)[0]?.[0] ?? 'X') as Pick
@@ -43,17 +29,27 @@ function App() {
   const [activeSection, setActiveSection] = useState<'round' | 'group' | 'cash'>('round')
   const [activeTab, setActiveTab] = useState<'tips' | 'captain'>('tips')
   const [selected, setSelected] = useState<Record<number, Pick>>({})
+  const [groupVotes, setGroupVotes] = useState<GroupVote[]>([])
+  const [payments, setPayments] = useState<Payment[]>([])
   const activeMatches = liveMatches ?? []
+  const captain = groupMembers.find((member) => member.role === 'owner') ?? groupMembers[0]
 
   const system = useMemo(() => {
     const columns = activeMatches.map((match) => {
-      const ordered = Object.entries(match.picks).sort(([, a], [, b]) => b - a) as [Pick, number][]
+      const votes = groupVotes.filter((vote) => vote.match_id === match.id)
+      const counts = (['1', 'X', '2'] as Pick[]).map((pick) => [pick, votes.filter((vote) => vote.selection === pick).length] as [Pick, number])
+      const ordered = counts.sort(([, a], [, b]) => b - a)
+      if (!votes.length) return [leadingPick(match.picks)]
+      if (ordered[0][1] === ordered[1][1]) {
+        const captainPick = votes.find((vote) => vote.user_id === captain?.user_id)?.selection
+        if (captainPick && ordered.slice(0, 2).some(([pick]) => pick === captainPick)) return [captainPick]
+      }
       if (ordered[0][1] - ordered[1][1] >= 2) return [ordered[0][0]]
       if (ordered[0][1] === ordered[2][1]) return ['1', 'X', '2'] as Pick[]
       return ordered.slice(0, 2).map(([pick]) => pick)
     })
     return { columns, rows: columns.reduce((total, column) => total * column.length, 1) }
-  }, [activeMatches])
+  }, [activeMatches, captain?.user_id, groupVotes])
 
   useEffect(() => {
     async function startAnonymousSession() {
@@ -118,10 +114,12 @@ function App() {
     const userId = session.user.id
 
     async function loadRound() {
-      const { data: roundData } = await supabase.from('rounds').select('id, external_draw_number, label, status, internal_deadline_at, official_close_at').eq('group_id', groupId).eq('status', 'open').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      const { data: roundData } = await supabase.from('rounds').select('id, external_draw_number, label, status, internal_deadline_at, official_close_at, weekly_contribution').eq('group_id', groupId).in('status', ['open', 'locked']).order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!roundData) {
         setRound(null)
         setLiveMatches(null)
+        setGroupVotes([])
+        setPayments([])
         return
       }
 
@@ -144,18 +142,23 @@ function App() {
       setRound(roundData as Round)
       setLiveMatches(nextMatches)
 
-      const { data: predictionRows } = await supabase.from('predictions').select('match_id, selection').eq('round_id', roundData.id).eq('user_id', userId)
+      const [{ data: predictionRows }, { data: allPredictionRows }, { data: paymentRows }] = await Promise.all([
+        supabase.from('predictions').select('match_id, selection').eq('round_id', roundData.id).eq('user_id', userId),
+        supabase.from('predictions').select('match_id, user_id, selection').eq('round_id', roundData.id),
+        supabase.from('payments').select('user_id, amount, status').eq('round_id', roundData.id),
+      ])
       const savedByMatch = new Map((predictionRows ?? []).map((prediction) => [prediction.match_id, prediction.selection as Pick]))
       setSelected(Object.fromEntries(nextMatches.map((match) => [match.number, savedByMatch.get(match.id ?? '') ?? leadingPick(match.picks)])))
+      setGroupVotes((allPredictionRows ?? []) as GroupVote[])
+      setPayments((paymentRows ?? []).map((payment) => ({ ...payment, amount: Number(payment.amount) })) as Payment[])
     }
 
     loadRound()
   }, [groupId, session, roundRefreshKey])
 
   async function savePick(match: Match, pick: Pick) {
+    if (!round || round.status !== 'open' || !match.id || !session) return
     setSelected((current) => ({ ...current, [match.number]: pick }))
-    if (!round || !match.id || !session) return
-
     await supabase.from('predictions').upsert({
       round_id: round.id,
       match_id: match.id,
@@ -172,8 +175,7 @@ function App() {
   if (!group) return <div className="auth-loading">{authError || 'Gruppen kunde inte hittas.'}</div>
 
   const savedCount = Object.keys(selected).length
-  const cost = Math.max(1, Math.ceil(system.rows / 2))
-
+  const cost = system.rows
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -186,14 +188,14 @@ function App() {
           <p className="eyebrow">{group.name.toUpperCase()} · {round?.label ?? 'TESTOMGÅNG'}</p>
           <h1>Veckans system</h1>
         </div>
-        <div className="round-badge"><span>STATUS</span><strong>ÖPPEN</strong></div>
+        <div className="round-badge"><span>STATUS</span><strong>{round?.status === 'locked' ? 'LÅST' : 'ÖPPEN'}</strong></div>
       </section>
 
       <section className="deadline-bar">
         <Clock3 size={17} /><div><span>Röstningen stänger</span><strong>TOR 23:59</strong></div><ChevronRight size={17} />
       </section>
 
-      {activeSection === 'group' ? <GroupPanel group={group} members={groupMembers} /> : <>
+      {activeSection === 'group' ? <GroupPanel group={group} members={groupMembers} /> : activeSection === 'cash' ? <CashPanel groupId={groupId} round={round} members={groupMembers} payments={payments} currentUserId={session.user.id} onPaymentsChanged={() => setRoundRefreshKey((value) => value + 1)} /> : <>
       <nav className="tabs" aria-label="Sektioner">
         <button className={activeTab === 'tips' ? 'active' : ''} onClick={() => setActiveTab('tips')}>MINA TECKEN <span>{savedCount}/13</span></button>
         <button className={activeTab === 'captain' ? 'active' : ''} onClick={() => setActiveTab('captain')}>KAPTEN <span><Crown size={13} /></span></button>
@@ -210,13 +212,13 @@ function App() {
             </div>
           </article>)}
         </div> : <div className="empty-round">Ingen aktiv omgång ännu. Importera veckans matcher under fliken <strong>Kapten</strong>.</div>}
-      </> : <CaptainPanel members={groupMembers} groupId={groupId} currentUserId={session.user.id} currentDrawNumber={round?.external_draw_number} onRoundImported={() => setRoundRefreshKey((value) => value + 1)} />}
+      </> : <CaptainPanel members={groupMembers} groupId={groupId} currentUserId={session.user.id} currentDrawNumber={round?.external_draw_number} round={round} system={system} sessionUserId={session.user.id} onRoundImported={() => setRoundRefreshKey((value) => value + 1)} />}
 
       <section className="system-panel">
         <div className="panel-heading"><div><p className="eyebrow">LIVE FRÅN GRUPPEN</p><h2>Systembygget</h2></div><Receipt size={20} /></div>
-        <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>Beräknad insats</span><b>{cost} kr</b></div></div>
-        <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: '76%' }} /></div><b>76%</b></div>
-        <p className="system-note">Spikar på majoriteten, gardering där gruppen tvekar. Kaptenen avgör vid lika röst.</p>
+        <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>Beräknad insats</span><b>{cost.toFixed(0)} kr</b></div></div>
+        <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: `${Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%` }} /></div><b>{Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%</b></div>
+        <p className="system-note">{system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgarderingar. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
       </section>
 
       </>}
@@ -269,14 +271,16 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
   )
 }
 
-function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, onRoundImported }: { members: GroupMember[]; groupId: string; currentUserId: string; currentDrawNumber?: number; onRoundImported: () => void }) {
+function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, round, system, sessionUserId, onRoundImported }: { members: GroupMember[]; groupId: string; currentUserId: string; currentDrawNumber?: number; round: Round | null; system: { columns: Pick[][]; rows: number }; sessionUserId: string; onRoundImported: () => void }) {
   const [importing, setImporting] = useState(false)
   const [importMessage, setImportMessage] = useState('')
   const [importError, setImportError] = useState('')
+  const [locking, setLocking] = useState(false)
   const captain = members.find((member) => member.role === 'owner') ?? members[0]
 
   const currentMember = members.find((member) => member.user_id === currentUserId)
   const canImport = Boolean(currentMember?.active)
+  const canLock = currentMember?.active && (currentMember.role === 'owner' || currentMember.role === 'admin')
 
   async function importRound(drawNumber?: number) {
     setImporting(true)
@@ -310,7 +314,50 @@ function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, onRo
     setImporting(false)
   }
 
-  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && <><p className="import-note">Alla aktiva gruppmedlemmar kan försöka ladda nästa publicerade omgång.</p><button className="primary-button" onClick={() => importRound()} disabled={importing}>{importing ? 'Importerar omgång...' : 'Importera nästa omgång'} <ChevronRight size={17} /></button>{currentDrawNumber && <button className="secondary-button" onClick={() => importRound(currentDrawNumber)} disabled={importing}>Uppdatera omgång {currentDrawNumber} <ChevronRight size={17} /></button>}{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</>}</section>
+  async function lockSystem() {
+    if (!round || !canLock) return
+    setLocking(true)
+    setImportError('')
+    const selections = Object.fromEntries(system.columns.map((column, index) => [index + 1, column]))
+    const { error: systemError } = await supabase.from('round_systems').upsert({
+      round_id: round.id,
+      selections,
+      row_count: system.rows,
+      row_cost: 1,
+      total_cost: system.rows,
+      created_by: sessionUserId,
+      locked_at: new Date().toISOString(),
+    })
+    if (systemError) setImportError(systemError.message)
+    else {
+      const { error: roundError } = await supabase.from('rounds').update({ status: 'locked' }).eq('id', round.id)
+      if (roundError) setImportError(roundError.message)
+      else {
+        setImportMessage('Systemet är låst och klart för inlämning.')
+        onRoundImported()
+      }
+    }
+    setLocking(false)
+  }
+
+  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && round?.status === 'open' && <><p className="import-note">Alla aktiva gruppmedlemmar kan försöka ladda nästa publicerade omgång.</p><button className="primary-button" onClick={() => importRound()} disabled={importing}>{importing ? 'Importerar omgång...' : 'Importera nästa omgång'} <ChevronRight size={17} /></button>{currentDrawNumber && <button className="secondary-button" onClick={() => importRound(currentDrawNumber)} disabled={importing}>Uppdatera omgång {currentDrawNumber} <ChevronRight size={17} /></button>}</>}{round?.status === 'open' && canLock && <button className="primary-button" onClick={lockSystem} disabled={locking}><Lock size={17} />{locking ? 'Låser systemet...' : 'Lås systemet'}</button>}{round?.status === 'locked' && <p className="auth-message">Systemet är låst. Rösterna kan inte längre ändras.</p>}{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</section>
+}
+
+function CashPanel({ groupId, round, members, payments, currentUserId, onPaymentsChanged }: { groupId: string; round: Round | null; members: GroupMember[]; payments: Payment[]; currentUserId: string; onPaymentsChanged: () => void }) {
+  const [saving, setSaving] = useState<string | null>(null)
+  if (!round) return <div className="empty-round">Importera en omgång först för att börja hålla ordning på betalningarna.</div>
+  const activeRound = round
+  const currentMember = members.find((member) => member.user_id === currentUserId)
+  const canConfirm = currentMember?.active && (currentMember.role === 'owner' || currentMember.role === 'admin')
+
+  async function markPaid(member: GroupMember, status: Payment['status']) {
+    setSaving(member.user_id)
+    const { error } = await supabase.from('payments').upsert({ round_id: activeRound.id, user_id: member.user_id, amount: activeRound.weekly_contribution, status, updated_at: new Date().toISOString() }, { onConflict: 'round_id,user_id' })
+    if (!error) onPaymentsChanged()
+    setSaving(null)
+  }
+
+  return <section className="cash-view"><div className="section-intro"><div><p className="eyebrow">MANUELL KASSA</p><h2>{round.weekly_contribution} kr per person</h2><p>Betalningar görs separat, till exempel via Swish.</p></div><CircleDollarSign size={22} /></div><div className="member-list">{members.map((member) => { const payment = payments.find((item) => item.user_id === member.user_id); const status = payment?.status ?? 'unpaid'; return <div className="payment-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className={status === 'confirmed' ? 'paid' : 'unpaid'}>{status === 'confirmed' ? 'Betald' : status === 'reported' ? 'Anmäld' : 'Obetald'}</span>{member.user_id === currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'reported')} disabled={saving === member.user_id}>Jag har betalat</button>}{canConfirm && member.user_id !== currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'confirmed')} disabled={saving === member.user_id}>Bekräfta</button>}</div>})}</div></section>
 }
 
 function GroupPanel({ group, members }: { group: Group; members: GroupMember[] }) {

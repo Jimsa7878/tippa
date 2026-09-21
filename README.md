@@ -42,6 +42,12 @@ supabase functions deploy import-svenska-spel
 
 `SVENSKA_SPEL_DRAWS_URL` är valfri. Om den finns används den för att hitta aktuell komplett omgång; annars används `SVENSKA_SPEL_API_URL` som startpunkt. Importen läser gruppens senast sparade omgång och försöker sedan nästa nummer, exempelvis `4972` efter `4971`. En ny omgång sparas först när exakt 13 matcher har hittats. Anropet kräver en inloggad gruppmedlem och JSON med `groupId` och `internalDeadlineAt`.
 
+## System och kassa
+
+Gruppens system räknas från medlemmarnas egna tips. En tydlig majoritet blir spik, osäkra matcher blir hel- eller halvgardering och systemkostnaden räknas som en krona per rad. Ägare eller admin kan spara systemet och låsa omgången; efter låsning går tipsen inte längre att ändra.
+
+Kassan är medvetet manuell i MVP:n. Varje omgång har ett bidrag per person, som standard 25 kr. Medlemmar kan markera sin betalning som anmäld och ägare/admin kan bekräfta den. Appen hanterar inte pengar, Swish eller automatisk spelinlämning.
+
 ## GitHub Pages
 
 Lägg GitHub Actions-secrets `VITE_SUPABASE_URL` och `VITE_SUPABASE_ANON_KEY` i repositoryts `github-pages` environment. Aktivera Pages med GitHub Actions som källa.
