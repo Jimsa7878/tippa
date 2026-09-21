@@ -4,9 +4,10 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 
 type Pick = '1' | 'X' | '2'
-type Match = { number: number; home: string; away: string; kickoff: string; picks: Record<Pick, number>; mine?: Pick }
+type Match = { id?: string; number: number; home: string; away: string; kickoff: string; picks: Record<Pick, number>; mine?: Pick }
 type Group = { id: string; name: string; join_code: string; max_members: number }
 type GroupMember = { user_id: string; display_name: string; role: 'owner' | 'admin' | 'member'; active: boolean }
+type Round = { id: string; label: string; status: string; internal_deadline_at: string; official_close_at: string | null }
 
 const matches: Match[] = [
   { number: 1, home: 'Nottingham', away: 'Coventry', kickoff: 'Lör 18:30', picks: { '1': 3, X: 1, '2': 1 }, mine: '1' },
@@ -36,21 +37,24 @@ function App() {
   const [group, setGroup] = useState<Group | null>(null)
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([])
   const [groupLoading, setGroupLoading] = useState(false)
+  const [round, setRound] = useState<Round | null>(null)
+  const [liveMatches, setLiveMatches] = useState<Match[] | null>(null)
   const [activeSection, setActiveSection] = useState<'round' | 'group' | 'cash'>('round')
   const [activeTab, setActiveTab] = useState<'tips' | 'captain'>('tips')
   const [selected, setSelected] = useState<Record<number, Pick>>(
     Object.fromEntries(matches.map((match) => [match.number, match.mine ?? leadingPick(match.picks)])),
   )
+  const activeMatches = liveMatches ?? matches
 
   const system = useMemo(() => {
-    const columns = matches.map((match) => {
+    const columns = activeMatches.map((match) => {
       const ordered = Object.entries(match.picks).sort(([, a], [, b]) => b - a) as [Pick, number][]
       if (ordered[0][1] - ordered[1][1] >= 2) return [ordered[0][0]]
       if (ordered[0][1] === ordered[2][1]) return ['1', 'X', '2'] as Pick[]
       return ordered.slice(0, 2).map(([pick]) => pick)
     })
     return { columns, rows: columns.reduce((total, column) => total * column.length, 1) }
-  }, [])
+  }, [activeMatches])
 
   useEffect(() => {
     async function startAnonymousSession() {
@@ -110,6 +114,56 @@ function App() {
     loadGroup()
   }, [groupId, session])
 
+  useEffect(() => {
+    if (!session || !groupId) return
+    const userId = session.user.id
+
+    async function loadRound() {
+      const { data: roundData } = await supabase.from('rounds').select('id, label, status, internal_deadline_at, official_close_at').eq('group_id', groupId).eq('status', 'open').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (!roundData) {
+        setRound(null)
+        setLiveMatches(null)
+        return
+      }
+
+      const { data: matchRows } = await supabase.from('matches').select('id, match_number, home_team, away_team, kickoff_at, svenska_folket').eq('round_id', roundData.id).order('match_number')
+      const nextMatches = (matchRows ?? []).map((match) => {
+        const folk = (match.svenska_folket ?? {}) as Partial<Record<Pick, number>>
+        return {
+          id: match.id,
+          number: match.match_number,
+          home: match.home_team,
+          away: match.away_team,
+          kickoff: match.kickoff_at ? new Date(match.kickoff_at).toLocaleString('sv-SE', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'Tid ej satt',
+          picks: { '1': Number(folk['1'] ?? 0), X: Number(folk.X ?? 0), '2': Number(folk['2'] ?? 0) },
+        }
+      })
+
+      if (!nextMatches.length) return
+      setRound(roundData as Round)
+      setLiveMatches(nextMatches)
+
+      const { data: predictionRows } = await supabase.from('predictions').select('match_id, selection').eq('round_id', roundData.id).eq('user_id', userId)
+      const savedByMatch = new Map((predictionRows ?? []).map((prediction) => [prediction.match_id, prediction.selection as Pick]))
+      setSelected(Object.fromEntries(nextMatches.map((match) => [match.number, savedByMatch.get(match.id ?? '') ?? leadingPick(match.picks)])))
+    }
+
+    loadRound()
+  }, [groupId, session])
+
+  async function savePick(match: Match, pick: Pick) {
+    setSelected((current) => ({ ...current, [match.number]: pick }))
+    if (!round || !match.id || !session) return
+
+    await supabase.from('predictions').upsert({
+      round_id: round.id,
+      match_id: match.id,
+      user_id: session.user.id,
+      selection: pick,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'match_id,user_id' })
+  }
+
   if (authLoading) return <div className="auth-loading">Laddar Tippa...</div>
   if (!session) return <div className="auth-loading">{authError || 'Kunde inte starta Tippa.'}</div>
   if (!groupId) return <GroupGate onJoined={(joinedGroupId) => { sessionStorage.setItem('tippa-group-id', joinedGroupId); setGroupId(joinedGroupId) }} />
@@ -128,7 +182,7 @@ function App() {
 
       <section className="page-heading">
         <div>
-          <p className="eyebrow">{group.name.toUpperCase()} · VECKA 38</p>
+          <p className="eyebrow">{group.name.toUpperCase()} · {round?.label ?? 'TESTOMGÅNG'}</p>
           <h1>Veckans system</h1>
         </div>
         <div className="round-badge"><span>STATUS</span><strong>ÖPPEN</strong></div>
@@ -147,11 +201,11 @@ function App() {
       {activeTab === 'tips' ? <>
         <section className="section-intro"><div><h2>Din rad</h2><p>Välj ett tecken per match. Ändra fritt fram till deadline.</p></div><span className="save-state"><Check size={14} /> Sparad</span></section>
         <div className="match-list">
-          {matches.map((match) => <article className="match-row" key={match.number}>
+          {activeMatches.map((match) => <article className="match-row" key={match.id ?? match.number}>
             <span className="match-number">{String(match.number).padStart(2, '0')}</span>
             <div className="match-info"><strong>{match.home}</strong><span>{match.away}</span><small>{match.kickoff}</small></div>
             <div className="pick-group" aria-label={`Välj tecken för ${match.home} mot ${match.away}`}>
-              {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => setSelected((current) => ({ ...current, [match.number]: pick }))}>{pick}<small>{match.picks[pick]}</small></button>)}
+              {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => savePick(match, pick)}>{pick}<small>{match.picks[pick]}</small></button>)}
             </div>
           </article>)}
         </div>
