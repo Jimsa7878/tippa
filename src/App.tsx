@@ -279,6 +279,7 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
   const [name, setName] = useState('')
   const [groupName, setGroupName] = useState('')
   const [code, setCode] = useState('')
+  const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -287,8 +288,8 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
     setError('')
     setSubmitting(true)
     const result = mode === 'join'
-      ? await supabase.rpc('join_group_by_code', { target_code: code, member_name: name })
-      : await supabase.rpc('create_group_with_code', { target_name: groupName, target_code: code, member_name: name })
+      ? await supabase.rpc('join_group_by_code', { target_code: code, member_name: name, member_pin: pin })
+      : await supabase.rpc('create_group_with_code', { target_name: groupName, target_code: code, member_name: name, member_pin: pin })
 
     if (result.error) setError(result.error.message)
     else onJoined(result.data)
@@ -301,11 +302,12 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
       <section className="auth-panel">
         <p className="eyebrow">ÖPPEN GRUPP</p>
         <h1>{mode === 'join' ? 'Anslut till gruppen' : 'Skapa en grupp'}</h1>
-        <p className="auth-intro">Använd gruppens femsiffriga kod. Ingen e-post och inget lösenord behövs.</p>
+        <p className="auth-intro">Använd gruppens femsiffriga kod och din fyrsiffriga PIN. Ingen e-post behövs.</p>
         <form onSubmit={handleSubmit}>
           <label>Ditt namn<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Till exempel Jim" required /></label>
           {mode === 'create' && <label>Gruppens namn<input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Till exempel Lördagsgänget" required /></label>}
           <label>Gruppkod<input inputMode="numeric" pattern="[0-9]{5}" maxLength={5} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="Till exempel 37742" autoComplete="off" required /></label>
+          <label>Din PIN<input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, ''))} placeholder="Fyra siffror" autoComplete="off" required /></label>
           {error && <p className="auth-error">{error}</p>}
           <button className="primary-button" disabled={submitting}>{submitting ? 'Arbetar...' : mode === 'join' ? 'Anslut till gruppen' : 'Skapa gruppen'} <ChevronRight size={17} /></button>
         </form>
