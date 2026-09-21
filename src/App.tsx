@@ -409,6 +409,7 @@ function CaptainPanel({ members, groupId, currentUserId, currentDrawNumber, roun
 
 function CashPanel({ groupId, round, members, payments, currentUserId, onPaymentsChanged }: { groupId: string; round: Round | null; members: GroupMember[]; payments: Payment[]; currentUserId: string; onPaymentsChanged: () => void }) {
   const [saving, setSaving] = useState<string | null>(null)
+  const [paymentError, setPaymentError] = useState('')
   if (!round) return <div className="empty-round">Importera en omgång först för att börja hålla ordning på betalningarna.</div>
   const activeRound = round
   const currentMember = members.find((member) => member.user_id === currentUserId)
@@ -416,12 +417,14 @@ function CashPanel({ groupId, round, members, payments, currentUserId, onPayment
 
   async function markPaid(member: GroupMember, status: Payment['status']) {
     setSaving(member.user_id)
+    setPaymentError('')
     const { error } = await supabase.from('payments').upsert({ round_id: activeRound.id, user_id: member.user_id, amount: activeRound.weekly_contribution, status, updated_at: new Date().toISOString() }, { onConflict: 'round_id,user_id' })
-    if (!error) onPaymentsChanged()
+    if (error) setPaymentError(`Insatsen kunde inte sparas: ${error.message}`)
+    else onPaymentsChanged()
     setSaving(null)
   }
 
-  return <section className="cash-view"><div className="section-intro"><div><p className="eyebrow">SVENSKA SPEL-LAGET</p><h2>{round.weekly_contribution} kr per person</h2><p>Insatsen läggs i lagets Svenska Spel-kassa. Tippa hanterar inte själva pengarna.</p></div><CircleDollarSign size={22} /></div><div className="member-list">{members.map((member) => { const payment = payments.find((item) => item.user_id === member.user_id); const status = payment?.status ?? 'unpaid'; const isMine = member.user_id === currentUserId; return <div className="payment-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong>{isMine && status !== 'confirmed' ? <div className="payment-actions"><button className={`mini-button ${status === 'unpaid' ? 'active' : ''}`} onClick={() => markPaid(member, 'unpaid')} disabled={saving === member.user_id}>Saknas</button><button className={`mini-button ${status === 'reported' ? 'active' : ''}`} onClick={() => markPaid(member, 'reported')} disabled={saving === member.user_id}>Jag har lagt in</button></div> : <span className={status === 'confirmed' ? 'paid' : 'unpaid'}>{status === 'confirmed' ? 'Insats klar' : status === 'reported' ? 'Anmäld' : 'Saknas'}</span>}{canConfirm && member.user_id !== currentUserId && status === 'reported' && <button className="mini-button" onClick={() => markPaid(member, 'confirmed')} disabled={saving === member.user_id}>Bekräfta</button>}</div>})}</div></section>
+  return <section className="cash-view"><div className="section-intro"><div><p className="eyebrow">SVENSKA SPEL-LAGET</p><h2>{round.weekly_contribution} kr per person</h2><p>Insatsen läggs i lagets Svenska Spel-kassa. Tippa hanterar inte själva pengarna.</p></div><CircleDollarSign size={22} /></div>{paymentError && <p className="auth-error">{paymentError}</p>}<div className="member-list">{members.map((member) => { const payment = payments.find((item) => item.user_id === member.user_id); const status = payment?.status ?? 'unpaid'; const isMine = member.user_id === currentUserId; return <div className="payment-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong>{isMine && status !== 'confirmed' ? <div className="payment-actions"><button className={`mini-button ${status === 'unpaid' ? 'active' : ''}`} onClick={() => markPaid(member, 'unpaid')} disabled={saving === member.user_id}>Saknas</button><button className={`mini-button ${status === 'reported' ? 'active' : ''}`} onClick={() => markPaid(member, 'reported')} disabled={saving === member.user_id}>Jag har lagt in</button></div> : <span className={status === 'confirmed' ? 'paid' : 'unpaid'}>{status === 'confirmed' ? 'Insats klar' : status === 'reported' ? 'Anmäld' : 'Saknas'}</span>}{canConfirm && member.user_id !== currentUserId && status === 'reported' && <button className="mini-button" onClick={() => markPaid(member, 'confirmed')} disabled={saving === member.user_id}>Bekräfta</button>}</div>})}</div></section>
 }
 
 function TeamPanel({ group, members, groupId, round, system, matches, votes, payments, currentUserId, onRoundChanged }: { group: Group; members: GroupMember[]; groupId: string; round: Round | null; system: { columns: Pick[][]; rows: number }; matches: Match[]; votes: GroupVote[]; payments: Payment[]; currentUserId: string; onRoundChanged: () => void }) {
