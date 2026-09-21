@@ -100,9 +100,8 @@ Deno.serve(async (request) => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
     const apiUrl = Deno.env.get('SVENSKA_SPEL_API_URL')
-    if (!supabaseUrl || !serviceRoleKey || !apiUrl) throw new Error('Importer secrets are not configured')
+    if (!supabaseUrl || !apiUrl) throw new Error('Importer secrets are not configured')
 
     const authorization = request.headers.get('Authorization')
     if (!authorization) throw new Error('Authorization is required')
@@ -114,9 +113,14 @@ Deno.serve(async (request) => {
     const body = await request.json() as { groupId?: string; drawNumber?: number; internalDeadlineAt?: string }
     if (!body.groupId || !body.internalDeadlineAt) throw new Error('groupId and internalDeadlineAt are required')
 
-    const admin = createClient(supabaseUrl, serviceRoleKey)
-    const { data: membership } = await admin.from('group_members').select('role').eq('group_id', body.groupId).eq('user_id', userData.user.id).eq('active', true).maybeSingle()
-    if (!membership) throw new Error('Only active group members can import rounds')
+    const [{ data: membership, error: membershipError }, { data: group, error: groupError }] = await Promise.all([
+      userClient.from('group_members').select('role, active').eq('group_id', body.groupId).eq('user_id', userData.user.id).maybeSingle(),
+      userClient.from('groups').select('created_by').eq('id', body.groupId).maybeSingle(),
+    ])
+    if (membershipError) throw new Error(`Could not read group membership: ${membershipError.message}`)
+    if (groupError) throw new Error(`Could not read group: ${groupError.message}`)
+    const isGroupCreator = group?.created_by === userData.user.id
+    if ((!membership || !membership.active) && !isGroupCreator) throw new Error('Your current user is not an active member of this group')
 
     const upstreamResponse = await fetch(apiUrl, { headers: { Accept: 'application/json' } })
     if (!upstreamResponse.ok) throw new Error(`Svenska Spel API returned ${upstreamResponse.status}`)
@@ -126,15 +130,29 @@ Deno.serve(async (request) => {
 
     const drawNumber = Number(firstValue(draw, ['drawNumber', 'externalDrawNumber', 'number'])) || null
     const officialCloseAt = firstValue(draw, ['officialCloseAt', 'closingTime', 'closeTime', 'spelstopp'])
-    const { data: round, error: roundError } = await admin.from('rounds').upsert({
+    if (drawNumber === null) throw new Error('Svenska Spel API returned no draw number')
+
+    const roundPayload = {
       group_id: body.groupId,
       external_draw_number: drawNumber,
       label: String(firstValue(draw, ['label', 'name']) ?? `Stryktipset ${drawNumber ?? ''}`).trim(),
       status: 'open',
       internal_deadline_at: body.internalDeadlineAt,
       official_close_at: typeof officialCloseAt === 'string' ? officialCloseAt : null,
-    }, { onConflict: 'group_id,external_draw_number' }).select('id').single()
-    if (roundError || !round) throw new Error('Could not save round')
+    }
+    const { data: existingRound, error: lookupError } = await userClient.from('rounds').select('id').eq('group_id', body.groupId).eq('external_draw_number', drawNumber).maybeSingle()
+    if (lookupError) throw new Error(`Could not find existing round: ${lookupError.message}`)
+
+    let round: { id: string } | null = null
+    if (existingRound) {
+      const { data: updatedRound, error: updateError } = await userClient.from('rounds').update(roundPayload).eq('id', existingRound.id).select('id').single()
+      if (updateError) throw new Error(`Could not update round: ${updateError.message}`)
+      round = updatedRound
+    } else {
+      const { data: insertedRound, error: insertError } = await userClient.from('rounds').insert(roundPayload).select('id').single()
+      if (insertError) throw new Error(`Could not create round: ${insertError.message}`)
+      round = insertedRound
+    }
 
     const matchRows = events.map((event) => ({
       round_id: round.id,
@@ -148,8 +166,8 @@ Deno.serve(async (request) => {
       result: event.result,
       svenska_folket: event.svenskaFolket,
     }))
-    const { error: matchesError } = await admin.from('matches').upsert(matchRows, { onConflict: 'round_id,match_number' })
-    if (matchesError) throw new Error('Could not save matches')
+    const { error: matchesError } = await userClient.from('matches').upsert(matchRows, { onConflict: 'round_id,match_number' })
+    if (matchesError) throw new Error(`Could not save matches: ${matchesError.message}`)
 
     return new Response(JSON.stringify({ roundId: round.id, drawNumber, importedMatches: events.length }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   } catch (error) {
