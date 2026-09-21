@@ -39,6 +39,7 @@ function App() {
   const [groupLoading, setGroupLoading] = useState(false)
   const [round, setRound] = useState<Round | null>(null)
   const [liveMatches, setLiveMatches] = useState<Match[] | null>(null)
+  const [roundRefreshKey, setRoundRefreshKey] = useState(0)
   const [activeSection, setActiveSection] = useState<'round' | 'group' | 'cash'>('round')
   const [activeTab, setActiveTab] = useState<'tips' | 'captain'>('tips')
   const [selected, setSelected] = useState<Record<number, Pick>>(
@@ -112,7 +113,7 @@ function App() {
     }
 
     loadGroup()
-  }, [groupId, session])
+  }, [groupId, session, roundRefreshKey])
 
   useEffect(() => {
     if (!session || !groupId) return
@@ -209,7 +210,7 @@ function App() {
             </div>
           </article>)}
         </div>
-      </> : <CaptainPanel members={groupMembers} />}
+      </> : <CaptainPanel members={groupMembers} groupId={groupId} currentUserId={session.user.id} onRoundImported={() => setRoundRefreshKey((value) => value + 1)} />}
 
       <section className="system-panel">
         <div className="panel-heading"><div><p className="eyebrow">LIVE FRÅN GRUPPEN</p><h2>Systembygget</h2></div><Receipt size={20} /></div>
@@ -268,9 +269,39 @@ function GroupGate({ onJoined }: { onJoined: (groupId: string) => void }) {
   )
 }
 
-function CaptainPanel({ members }: { members: GroupMember[] }) {
+function CaptainPanel({ members, groupId, currentUserId, onRoundImported }: { members: GroupMember[]; groupId: string; currentUserId: string; onRoundImported: () => void }) {
+  const [importing, setImporting] = useState(false)
+  const [importMessage, setImportMessage] = useState('')
+  const [importError, setImportError] = useState('')
   const captain = members.find((member) => member.role === 'owner') ?? members[0]
-  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div><button className="primary-button">Visa systemförslag <ChevronRight size={17} /></button></section>
+
+  const currentMember = members.find((member) => member.user_id === currentUserId)
+  const canImport = currentMember?.role === 'owner' || currentMember?.role === 'admin'
+
+  async function importRound() {
+    setImporting(true)
+    setImportMessage('')
+    setImportError('')
+    const deadline = new Date()
+    deadline.setDate(deadline.getDate() + ((6 - deadline.getDay() + 7) % 7 || 7))
+    deadline.setHours(14, 0, 0, 0)
+
+    const { data, error } = await supabase.functions.invoke('import-svenska-spel', {
+      body: { groupId, internalDeadlineAt: deadline.toISOString() },
+    })
+
+    if (error) {
+      setImportError(error.message)
+    } else if (data?.error) {
+      setImportError(data.error)
+    } else {
+      setImportMessage(`${data?.importedMatches ?? 13} matcher importerades.`)
+      onRoundImported()
+    }
+    setImporting(false)
+  }
+
+  return <section className="captain-view"><div className="captain-card"><div className="captain-icon"><Crown size={22} /></div><div><p className="eyebrow">VECKANS KAPTEN</p><h2>{captain?.display_name ?? 'Inte vald'}</h2><p>Utslagsröst när gruppen inte är överens.</p></div></div><h3>Gruppens status</h3><div className="member-list">{members.map((member) => <div className="member-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className="status done">Aktiv</span><span className="paid">{member.role === 'owner' ? 'Kapten' : 'Medlem'}</span></div>)}</div>{canImport && <><button className="primary-button" onClick={importRound} disabled={importing}>{importing ? 'Importerar matcher...' : 'Importera veckans matcher'} <ChevronRight size={17} /></button>{importMessage && <p className="auth-message">{importMessage}</p>}{importError && <p className="auth-error">{importError}</p>}</>}<button className="secondary-button">Visa systemförslag <ChevronRight size={17} /></button></section>
 }
 
 function GroupPanel({ group, members }: { group: Group; members: GroupMember[] }) {
