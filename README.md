@@ -46,7 +46,7 @@ supabase functions deploy import-svenska-spel
 
 Gruppens system räknas från medlemmarnas egna tips. En tydlig majoritet blir spik, osäkra matcher blir hel- eller halvgardering och systemkostnaden räknas som en krona per rad. Ägare eller admin kan spara systemet och låsa omgången; efter låsning går tipsen inte längre att ändra.
 
-Kassan är medvetet manuell i MVP:n. Varje omgång har ett bidrag per person, som standard 25 kr. Medlemmar kan markera sin betalning som anmäld och ägare/admin kan bekräfta den. Appen hanterar inte pengar, Swish eller automatisk spelinlämning.
+Kassan ligger i Svenska Spel-laget i stället för i Tippa. Varje omgång har ett fast bidrag per person, som standard 20 kr. Tippa visar gruppens budget och systemkostnad, medan kaptenen lämnar in systemet och hanterar det faktiska saldot i Svenska Spels app. Medlemmar kan markera sin insats som klar och ägare/admin kan bekräfta den. Tippa hanterar inte pengar eller automatisk spelinlämning.
 
 ## GitHub Pages
 

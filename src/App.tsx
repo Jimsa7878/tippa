@@ -176,6 +176,7 @@ function App() {
 
   const savedCount = Object.keys(selected).length
   const cost = system.rows
+  const budget = groupMembers.length * (round?.weekly_contribution ?? 20)
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -216,7 +217,7 @@ function App() {
 
       <section className="system-panel">
         <div className="panel-heading"><div><p className="eyebrow">LIVE FRÅN GRUPPEN</p><h2>Systembygget</h2></div><Receipt size={20} /></div>
-        <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>Beräknad insats</span><b>{cost.toFixed(0)} kr</b></div></div>
+        <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>System / budget</span><b>{cost.toFixed(0)} / {budget.toFixed(0)} kr</b></div></div>
         <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: `${Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%` }} /></div><b>{Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%</b></div>
         <p className="system-note">{system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgarderingar. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
       </section>
@@ -357,7 +358,7 @@ function CashPanel({ groupId, round, members, payments, currentUserId, onPayment
     setSaving(null)
   }
 
-  return <section className="cash-view"><div className="section-intro"><div><p className="eyebrow">MANUELL KASSA</p><h2>{round.weekly_contribution} kr per person</h2><p>Betalningar görs separat, till exempel via Swish.</p></div><CircleDollarSign size={22} /></div><div className="member-list">{members.map((member) => { const payment = payments.find((item) => item.user_id === member.user_id); const status = payment?.status ?? 'unpaid'; return <div className="payment-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className={status === 'confirmed' ? 'paid' : 'unpaid'}>{status === 'confirmed' ? 'Betald' : status === 'reported' ? 'Anmäld' : 'Obetald'}</span>{member.user_id === currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'reported')} disabled={saving === member.user_id}>Jag har betalat</button>}{canConfirm && member.user_id !== currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'confirmed')} disabled={saving === member.user_id}>Bekräfta</button>}</div>})}</div></section>
+  return <section className="cash-view"><div className="section-intro"><div><p className="eyebrow">SVENSKA SPEL-LAGET</p><h2>{round.weekly_contribution} kr per person</h2><p>Insatsen läggs i lagets Svenska Spel-kassa. Tippa hanterar inte själva pengarna.</p></div><CircleDollarSign size={22} /></div><div className="member-list">{members.map((member) => { const payment = payments.find((item) => item.user_id === member.user_id); const status = payment?.status ?? 'unpaid'; return <div className="payment-row" key={member.user_id}><span className="avatar">{member.display_name.slice(0, 2).toUpperCase()}</span><strong>{member.display_name}</strong><span className={status === 'confirmed' ? 'paid' : 'unpaid'}>{status === 'confirmed' ? 'Insats klar' : status === 'reported' ? 'Anmäld' : 'Saknas'}</span>{member.user_id === currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'reported')} disabled={saving === member.user_id}>Jag har lagt in</button>}{canConfirm && member.user_id !== currentUserId && status !== 'confirmed' && <button className="mini-button" onClick={() => markPaid(member, 'confirmed')} disabled={saving === member.user_id}>Bekräfta</button>}</div>})}</div></section>
 }
 
 function GroupPanel({ group, members }: { group: Group; members: GroupMember[] }) {
