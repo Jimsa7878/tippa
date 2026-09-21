@@ -223,6 +223,7 @@ function App() {
         <div className="system-columns">{system.columns.map((column, index) => <span key={index}><small>{String(index + 1).padStart(2, '0')}</small>{column.join('')}</span>)}</div>
       </section>
       </div>
+      <SnackisPanel members={groupMembers} matches={activeMatches} votes={groupVotes} system={system} />
 
       </>}
 
@@ -381,6 +382,24 @@ function CashPanel({ groupId, round, members, payments, currentUserId, onPayment
 
 function TeamPanel({ group, members, groupId, round, system, matches, votes, payments, currentUserId, onRoundChanged }: { group: Group; members: GroupMember[]; groupId: string; round: Round | null; system: { columns: Pick[][]; rows: number }; matches: Match[]; votes: GroupVote[]; payments: Payment[]; currentUserId: string; onRoundChanged: () => void }) {
   return <section className="team-view"><div className="group-card"><p className="eyebrow">LAGET</p><h2>{group.name}</h2><p>Fem kompisar, ett gemensamt system och 20 kr var till Svenska Spel-laget.</p><button className="group-code" onClick={async () => navigator.clipboard.writeText(group.join_code)}><span>{group.join_code}</span><small>Kopiera kod</small></button></div><CaptainPanel members={members} groupId={groupId} currentUserId={currentUserId} currentDrawNumber={round?.external_draw_number} round={round} system={system} matches={matches} votes={votes} sessionUserId={currentUserId} onRoundImported={onRoundChanged} /><CashPanel groupId={groupId} round={round} members={members} payments={payments} currentUserId={currentUserId} onPaymentsChanged={onRoundChanged} /></section>
+}
+
+function SnackisPanel({ members, matches, votes, system }: { members: GroupMember[]; matches: Match[]; votes: GroupVote[]; system: { columns: Pick[][]; rows: number } }) {
+  const matchRows = matches.map((match, index) => {
+    const picks = votes.filter((vote) => vote.match_id === match.id).map((vote) => vote.selection)
+    return { match, index, picks, split: new Set(picks).size }
+  })
+  const mostDiscussed = matchRows.slice().sort((left, right) => right.split - left.split || right.picks.length - left.picks.length)[0]
+  const memberStats = members.map((member) => {
+    const memberPicks = matchRows.map(({ match }) => votes.find((vote) => vote.match_id === match.id && vote.user_id === member.user_id)?.selection)
+    const aligned = memberPicks.filter((pick, index) => pick && system.columns[index]?.includes(pick)).length
+    const unique = memberPicks.filter((pick, index) => pick && !system.columns[index]?.includes(pick)).length
+    return { member, picks: memberPicks, aligned, unique }
+  })
+  const mostAligned = memberStats.slice().sort((left, right) => right.aligned - left.aligned)[0]
+  const boldest = memberStats.slice().sort((left, right) => right.unique - left.unique)[0]
+
+  return <section className="snackis-panel"><div className="panel-heading"><div><p className="eyebrow">SNACKIS</p><h2>Varför tog du den?</h2></div><span className="snackis-count">{members.length} rader</span></div>{mostDiscussed && mostDiscussed.split > 1 && <div className="debate-card"><span className="debate-label">VECKANS HETASTE</span><strong>{mostDiscussed.match.number}. {mostDiscussed.match.home} v {mostDiscussed.match.away}</strong><span>{mostDiscussed.picks.join(' / ')} · här går laget isär</span></div>}<div className="badge-row">{mostAligned && <span><b>✓</b> Mest enig: {mostAligned.member.display_name}</span>}{boldest && boldest.unique > 0 && <span><b>↗</b> Mest modig: {boldest.member.display_name}</span>}</div><div className="vote-board"><div className="vote-board-header"><span>MEDLEM</span>{matches.map((match) => <small key={match.id}>{String(match.number).padStart(2, '0')}</small>)}</div>{memberStats.map(({ member, picks }) => <div className="vote-board-row" key={member.user_id}><strong>{member.display_name}</strong>{matches.map((match, index) => { const pick = picks[index]; const differs = pick && !system.columns[index]?.includes(pick); return <span className={differs ? 'differs' : ''} key={match.id}>{pick ?? '-'}</span> })}</div>)}</div><p className="snackis-note">Färgmarkeringen visar när någon går emot gruppens gemensamma system. Perfekt att fråga om i chatten.</p></section>
 }
 
 export default App
