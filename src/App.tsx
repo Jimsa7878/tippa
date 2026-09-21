@@ -163,6 +163,7 @@ function App() {
   async function savePick(match: Match, pick: Pick) {
     if (!round || round.status !== 'open' || !match.id || !session) return
     setSelected((current) => ({ ...current, [match.number]: pick }))
+    setGroupVotes((current) => [...current.filter((vote) => !(vote.match_id === match.id && vote.user_id === session.user.id)), { match_id: match.id as string, user_id: session.user.id, selection: pick }])
     await supabase.from('predictions').upsert({
       round_id: round.id,
       match_id: match.id,
@@ -211,6 +212,7 @@ function App() {
             <div className="pick-group" aria-label={`Välj tecken för ${match.home} mot ${match.away}`}>
               {(['1', 'X', '2'] as Pick[]).map((pick) => <button key={pick} className={`${selected[match.number] === pick ? 'selected ' : ''}${pick === leadingPick(match.picks) ? 'majority' : ''}`} onClick={() => savePick(match, pick)}>{pick}<small>{match.picks[pick]}</small></button>)}
             </div>
+            <div className="system-pick" aria-label={`Gruppens system för match ${match.number}`}><small>SYS</small><strong>{system.columns[match.number - 1]?.join('') ?? '-'}</strong></div>
           </article>)}
         </div> : <div className="empty-round">Ingen aktiv omgång ännu. Be kaptenen importera veckans matcher.</div>}
 
@@ -220,7 +222,6 @@ function App() {
         <div className="system-summary"><strong>{system.rows} <span>rader</span></strong><div><span>System / budget</span><b>{cost.toFixed(0)} / {budget.toFixed(0)} kr</b></div></div>
         <div className="coverage"><span>Gruppens täckning</span><div className="coverage-track"><i style={{ width: `${Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%` }} /></div><b>{Math.min(100, Math.round((system.columns.filter((column) => column.length > 1).length / 13) * 100))}%</b></div>
         <p className="system-note">{system.columns.filter((column) => column.length === 1).length} spikar · {system.columns.filter((column) => column.length === 2).length} halvgarderingar · {system.columns.filter((column) => column.length === 3).length} helgarderingar. {captain?.display_name ?? 'Kaptenen'} avgör vid lika röst.</p>
-        <div className="system-columns">{system.columns.map((column, index) => <span key={index}><small>{String(index + 1).padStart(2, '0')}</small>{column.join('')}</span>)}</div>
       </section>
       </div>
       <SnackisPanel members={groupMembers} matches={activeMatches} votes={groupVotes} system={system} />
@@ -399,7 +400,7 @@ function SnackisPanel({ members, matches, votes, system }: { members: GroupMembe
   const mostAligned = memberStats.slice().sort((left, right) => right.aligned - left.aligned)[0]
   const boldest = memberStats.slice().sort((left, right) => right.unique - left.unique)[0]
 
-  return <section className="snackis-panel"><div className="panel-heading"><div><p className="eyebrow">SNACKIS</p><h2>Varför tog du den?</h2></div><span className="snackis-count">{members.length} rader</span></div>{mostDiscussed && mostDiscussed.split > 1 && <div className="debate-card"><span className="debate-label">VECKANS HETASTE</span><strong>{mostDiscussed.match.number}. {mostDiscussed.match.home} v {mostDiscussed.match.away}</strong><span>{mostDiscussed.picks.join(' / ')} · här går laget isär</span></div>}<div className="badge-row">{mostAligned && <span><b>✓</b> Mest enig: {mostAligned.member.display_name}</span>}{boldest && boldest.unique > 0 && <span><b>↗</b> Mest modig: {boldest.member.display_name}</span>}</div><div className="vote-board"><div className="vote-board-header"><span>MEDLEM</span>{matches.map((match) => <small key={match.id}>{String(match.number).padStart(2, '0')}</small>)}</div>{memberStats.map(({ member, picks }) => <div className="vote-board-row" key={member.user_id}><strong>{member.display_name}</strong>{matches.map((match, index) => { const pick = picks[index]; const differs = pick && !system.columns[index]?.includes(pick); return <span className={differs ? 'differs' : ''} key={match.id}>{pick ?? '-'}</span> })}</div>)}</div><p className="snackis-note">Färgmarkeringen visar när någon går emot gruppens gemensamma system. Perfekt att fråga om i chatten.</p></section>
+  return <section className="snackis-panel"><div className="panel-heading"><div><p className="eyebrow">LAGETS RÖSTER</p><h2>Vem tog vad?</h2></div><span className="snackis-count">{members.length} rader</span></div>{mostDiscussed && mostDiscussed.split > 1 && <div className="debate-card"><span className="debate-label">VECKANS HETASTE</span><strong>{mostDiscussed.match.number}. {mostDiscussed.match.home} v {mostDiscussed.match.away}</strong><span>{mostDiscussed.picks.join(' / ')} · här går laget isär</span></div>}<div className="badge-row">{mostAligned && <span><b>✓</b> Mest enig: {mostAligned.member.display_name}</span>}{boldest && boldest.unique > 0 && <span><b>↗</b> Mest modig: {boldest.member.display_name}</span>}</div><div className="vote-board"><div className="vote-board-header"><span>MEDLEM</span>{matches.map((match) => <small key={match.id}>{String(match.number).padStart(2, '0')}</small>)}</div>{memberStats.map(({ member, picks }) => <div className="vote-board-row" key={member.user_id}><strong>{member.display_name}</strong>{matches.map((match, index) => { const pick = picks[index]; const differs = pick && !system.columns[index]?.includes(pick); return <span className={differs ? 'differs' : ''} key={match.id}>{pick ?? '-'}</span> })}</div>)}</div><p className="snackis-note">Avvikande val markeras. Det är här man ser varför laget tycker olika.</p></section>
 }
 
 export default App
