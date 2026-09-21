@@ -60,7 +60,15 @@ function App() {
       if (error) {
         setAuthError(error.message)
       } else if (data.session) {
-        setSession(data.session)
+        const { error: userError } = await supabase.auth.getUser()
+        if (!userError) {
+          setSession(data.session)
+        } else {
+          await supabase.auth.signOut()
+          const result = await supabase.auth.signInAnonymously()
+          if (result.error) setAuthError(result.error.message)
+          else setSession(result.data.session)
+        }
       } else {
         const result = await supabase.auth.signInAnonymously()
         if (result.error) setAuthError(result.error.message)
